@@ -5,10 +5,39 @@ const ORDER = PATHS.flatMap(p=>p.ids);
 const KEY='hindsight-v1';
 function load(){try{return JSON.parse(localStorage.getItem(KEY))||{}}catch(e){return {}}}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(P))}catch(e){}}
-const P=Object.assign({done:{},xp:0,streak:0,last:null},load());
+const P=Object.assign({done:{},xp:0,streak:0,last:null,week:null,freezeWeek:null,flash:null},load());
 const dayStr=d=>d.toISOString().slice(0,10);
 function localDay(offset=0){const d=new Date();d.setDate(d.getDate()+offset);return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10)}
-function currentStreak(){ if(!P.last) return 0; if(P.last===localDay(0)||P.last===localDay(-1)) return P.streak; return 0; }
+/* Weeks run Monday to Sunday; a week is named by its Monday's date. */
+function weekId(){ const d=new Date(); const back=(d.getDay()+6)%7; const m=new Date(d.getFullYear(),d.getMonth(),d.getDate()-back); return m.getFullYear()+'-'+String(m.getMonth()+1).padStart(2,'0')+'-'+String(m.getDate()).padStart(2,'0'); }
+/* A streak survives one missed day per week: the streak shield. */
+function streakAlive(last,freezeWeek){ if(!last) return false; if(last===localDay(0)||last===localDay(-1)) return true; return last===localDay(-2) && freezeWeek!==weekId(); }
+function currentStreak(){ return streakAlive(P.last,P.freezeWeek)?P.streak:0; }
+function shieldReady(){ return P.freezeWeek!==weekId(); }
+function playedToday(){
+  const today=localDay(0); S.shieldUsed=false;
+  if(P.last===today) return;
+  if(P.last===localDay(-1)) P.streak=(P.streak||0)+1;
+  else if(P.last===localDay(-2) && P.freezeWeek!==weekId()){ P.streak=(P.streak||0)+1; P.freezeWeek=weekId(); S.shieldUsed=true; }
+  else P.streak=1;
+  P.last=today;
+}
+function addXP(n){ P.xp=(P.xp||0)+n; const w=weekId(); if(!P.week||P.week.id!==w) P.week={id:w,xp:0}; P.week.xp+=n; }
+function weekXP(d){ return d&&d.week&&d.week.id===weekId()?(d.week.xp||0):0; }
+/* New cards: added within the last 14 days (STORIES[id].added = 'YYYY-MM-DD'). */
+function isFresh(id){ const a=STORIES[id]&&STORIES[id].added; if(!a) return false; return (Date.now()-new Date(a+'T00:00:00').getTime())/86400000 <= 14; }
+/* Who asked for a card (FULFILLED maps request id -> card id, or -> {card, by}). */
+function fulfilledCard(v){ return typeof v==='string'?v:(v&&v.card); }
+function requestedBy(cardId){
+  if(typeof FULFILLED==='undefined') return '';
+  for(const [rid,v] of Object.entries(FULFILLED)){
+    if(fulfilledCard(v)!==cardId) continue;
+    if(v&&v.by) return v.by;
+    const r=(typeof SH!=='undefined'&&SH.reqs||[]).find(x=>x.id===rid);
+    if(r) return nameFor(r.uid);
+  }
+  return '';
+}
 
 /* ---------- narration ---------- */
 const canSpeak = 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window;
@@ -56,6 +85,54 @@ function renderRanks(){
   </div>`;
 }
 
+/* ---------- flashback quiz ---------- */
+const FLASH_LEN=5;
+function flashPool(){ const out=[]; ORDER.filter(i=>P.done[i]).forEach(id=>STORIES[id].quiz.forEach((q,qi)=>out.push([id,qi]))); return out; }
+function flashEntry(){
+  const n=cardsDone(P.done);
+  if(flashPool().length<FLASH_LEN) return `<div class="flash-card locked"><span class="fl-ico" aria-hidden="true">${FLASH_ICON}</span><span><b>Flashback quiz</b><br><span class="k">Collect ${Math.max(1,2-n)} more card${2-n===1?'':'s'} to unlock a quick quiz on cards you’ve already played.</span></span></div>`;
+  const earned=P.flash===localDay(0);
+  return `<button class="flash-card" data-act="flash"><span class="fl-ico" aria-hidden="true">${FLASH_ICON}</span><span><b>Flashback quiz</b><br><span class="k">${FLASH_LEN} quick questions from your cards · ${earned?'today’s bonus earned':'up to +25 XP'}</span></span><span class="chev-r" aria-hidden="true"></span></button>`;
+}
+const FLASH_ICON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3 4v4.5h4.5"/><path d="M12 7.5V12l3 2"/></svg>';
+function startFlash(){
+  const pool=flashPool(); if(pool.length<FLASH_LEN) return;
+  for(let i=pool.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [pool[i],pool[j]]=[pool[j],pool[i]]; }
+  stopSpeech(); S={view:'flash',fq:pool.slice(0,FLASH_LEN),fi:0,picked:null,score:0}; render();
+}
+function curQ(){ if(S.view==='flash'){ const [id,qi]=S.fq[S.fi]; return STORIES[id].quiz[qi]; } return STORIES[S.id].quiz[S.qi]; }
+function renderFlash(){
+  const [id]=S.fq[S.fi], st=STORIES[id], q=curQ(), answered=S.picked!==null;
+  const segs=S.fq.map((_,i)=>`<i class="${i<=S.fi?'f':''}"></i>`).join('');
+  app.innerHTML=`<div class="story">
+    <div class="bar"><button class="iconbtn" data-act="close" aria-label="Close flashback quiz">✕</button><div class="segs" aria-hidden="true">${segs}</div></div>
+    <div class="stage">${heroMini(id)}<div class="q">
+      <span class="sc">Flashback · question ${S.fi+1} of ${S.fq.length}</span>
+      <h2>${esc(q.q)}</h2>
+      ${q.o.map((o,i)=>{let c='';if(answered){if(i===q.a)c='right';else if(i===S.picked)c='wrong';}
+        return `<button class="opt ${c}" data-pick="${i}" ${answered?'disabled':''}>${esc(o)}</button>`}).join('')}
+      ${answered?`<p class="why"><b>${S.picked===q.a?'Correct.':'Not quite.'}</b> ${esc(q.why)}</p>`:''}
+    </div></div>
+    <div class="nav"><button class="primary" data-act="fnext" ${answered?'':'disabled'}>${S.fi===S.fq.length-1?'See my score':'Next question'}</button></div>
+  </div>`;
+}
+function finishFlash(){
+  const today=localDay(0), first=P.flash!==today;
+  const bonus=first?S.score*5:0;
+  P.flash=today; addXP(bonus); playedToday(); save(); pushProgress();
+  S.bonus=bonus; S.flashFirst=first; S.view='flashdone'; render();
+}
+function renderFlashDone(){
+  app.innerHTML=`<div class="finish">
+    <span class="sc">Flashback complete</span>
+    <span class="fl-big" aria-hidden="true">${FLASH_ICON}</span>
+    <h2 class="fl-score">${S.score} of ${S.fq.length}</h2>
+    <p class="score">${S.flashFirst?`+${S.bonus} XP`:'Today’s bonus XP is already earned, but practice still counts'} · ${currentStreak()}-day streak</p>
+    ${S.shieldUsed?'<p class="shieldnote">Your streak shield saved your streak. You get a new one on Monday.</p>':''}
+    <div class="rowb2"><button class="cta" data-act="flash">Another round</button><button class="cta ghost" data-go="home">Back to the decks</button></div>
+  </div>`;
+}
+
 /* ---------- family scoreboard and requests (Firebase) ---------- */
 const FIREBASE_CONFIG={
   apiKey:"AIzaSyCgQYa4-Pdns68RJEufflgSr4G81FExk_0",
@@ -71,7 +148,7 @@ function loadProfile(){try{return JSON.parse(localStorage.getItem(PROFILE_KEY))}
 function saveProfile(p){try{localStorage.setItem(PROFILE_KEY,JSON.stringify(p))}catch(e){}}
 const cleanCode=c=>String(c||'').trim().toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9-]/g,'').slice(0,40);
 let PROFILE=loadProfile();
-const SH={state:'loading', me:null, board:{}, reqs:[], fs:null, db:null, writing:Promise.resolve()};
+const SH={tab:'week', state:'loading', me:null, board:{}, reqs:[], fs:null, db:null, writing:Promise.resolve()};
 const BRAND_HTML=`<span class="sc eyebrow">A deck of history</span>
       <div class="brand">
         <svg class="mark" viewBox="0 0 48 60" aria-hidden="true">
@@ -87,7 +164,7 @@ const BRAND_HTML=`<span class="sc eyebrow">A deck of history</span>
         <h1>If only <span>I knew</span></h1>
       </div>`;
 
-function streakOf(d){ if(!d||!d.last) return 0; return (d.last===localDay(0)||d.last===localDay(-1)) ? (d.streak||0) : 0; }
+function streakOf(d){ return d&&streakAlive(d.last,d.freeze)?(d.streak||0):0; }
 function nameFor(uid){ const d=SH.board[uid]; return (d&&d.name) || (uid===SH.me?'You':'Someone'); }
 function initialAv(uid){
   const n=nameFor(uid), h=hashStr(uid)%360;
@@ -99,14 +176,16 @@ function boardHTML(){
   if(SH.state==='error') return '<p class="note">The scoreboard can’t be reached right now. Your progress is still saved on this device and will sync next time.</p>';
   const ids=Object.keys(SH.board).filter(id=>SH.board[id]&&SH.board[id].name);
   if(!ids.length) return '<p class="note">Nobody has collected a card yet. Be the first.</p>';
-  ids.sort((a,b)=>(SH.board[b].xp||0)-(SH.board[a].xp||0));
-  return ids.map((id,i)=>{const d=SH.board[id]; const n=Object.keys(d.done||{}).filter(k=>STORIES[k]).length;
-    return `<div class="prow"><span class="rank">${i+1}</span>${initialAv(id)}<span><span class="pn">${esc(nameFor(id))}${id===SH.me?' (you)':''}</span><br><span class="ps">${esc(RANKS[rankFor(n)].name)} · ${n} cards · ${streakOf(d)}-day streak</span></span><span class="px">${d.xp||0} XP</span></div>`}).join('');
+  const wk=SH.tab==='week', score=d=>wk?weekXP(d):(d.xp||0);
+  ids.sort((a,b)=>score(SH.board[b])-score(SH.board[a]));
+  const tabs=`<div class="tabs" role="tablist"><button role="tab" aria-selected="${wk}" class="${wk?'on':''}" data-act="tab-week">This week</button><button role="tab" aria-selected="${!wk}" class="${wk?'':'on'}" data-act="tab-all">All time</button><span class="k">${wk?'Resets every Monday':''}</span></div>`;
+  return tabs+ids.map((id,i)=>{const d=SH.board[id]; const n=Object.keys(d.done||{}).filter(k=>STORIES[k]).length;
+    return `<div class="prow"><span class="rank">${i+1}</span>${initialAv(id)}<span><span class="pn">${esc(nameFor(id))}${id===SH.me?' (you)':''}</span><br><span class="ps">${esc(RANKS[rankFor(n)].name)} · ${n} cards · ${streakOf(d)}-day streak</span></span><span class="px">${score(d)} XP</span></div>`}).join('');
 }
 function reqsHTML(){
   if(PROFILE&&PROFILE.solo) return '';
   if(SH.state!=='on'||!SH.reqs.length) return '';
-  return '<p class="sc" style="margin:14px 0 0">Requested so far</p>'+SH.reqs.slice(0,12).map(r=>{const made=(typeof FULFILLED!=='undefined')&&FULFILLED[r.id]&&STORIES[FULFILLED[r.id]]?FULFILLED[r.id]:null;
+  return '<p class="sc" style="margin:14px 0 0">Requested so far</p>'+SH.reqs.slice(0,12).map(r=>{const fc=(typeof FULFILLED!=='undefined')?fulfilledCard(FULFILLED[r.id]):null; const made=fc&&STORIES[fc]?fc:null;
     return `<div class="rq${made?' made':''}"><span class="tx">${esc(r.text)}</span><span class="by">${esc(nameFor(r.uid))} · ${esc(String(r.at).slice(0,10))}</span>${made?`<button class="added" data-open="${made}"><span aria-hidden="true">✓</span> Added as a card: ${esc(STORIES[made].title)}</button>`:''}</div>`;}).join('');
 }
 function refreshShared(){
@@ -122,7 +201,7 @@ function queueWrite(fn){
 function pushProgress(){
   if(SH.state!=='on'||!SH.me||!PROFILE||PROFILE.solo) return Promise.resolve();
   const fs=SH.fs;
-  const body={name:PROFILE.name, done:Object.assign({},P.done), xp:P.xp||0, streak:P.streak||0, last:P.last||null, updated:new Date().toISOString()};
+  const body={name:PROFILE.name, done:Object.assign({},P.done), xp:P.xp||0, streak:P.streak||0, last:P.last||null, week:P.week||null, freeze:P.freezeWeek||null, updated:new Date().toISOString()};
   return queueWrite(()=>fs.setDoc(fs.doc(SH.db,'families',PROFILE.code,'players',SH.me),body));
 }
 async function initShared(){
@@ -145,6 +224,8 @@ async function initShared(){
       P.xp=Math.max(P.xp||0,remote.xp||0);
       if((remote.last||'')>(P.last||'')){P.last=remote.last;P.streak=remote.streak||0;}
       else if(remote.last===P.last){P.streak=Math.max(P.streak||0,remote.streak||0);}
+      if(remote.week&&(!P.week||remote.week.id>P.week.id||(remote.week.id===P.week.id&&remote.week.xp>P.week.xp))) P.week=remote.week;
+      if(remote.freeze&&(!P.freezeWeek||remote.freeze>P.freezeWeek)) P.freezeWeek=remote.freeze;
       save();
     }
     SH.state='on'; clearTimeout(timer);
@@ -323,19 +404,19 @@ function deckHTML(p){
   const done=p.ids.filter(i=>P.done[i]).length;
   return `<details class="deck" data-deck="${p.id}"${OPEN.has(p.id)?' open':''}>
     <summary>${artCanvas(p.art,'deck-'+p.id,'')}
-      <span class="dk-t"><span class="sc">Deck</span><b>${esc(p.name)}</b></span>
+      <span class="dk-t"><span class="sc">Deck${p.ids.some(i=>isFresh(i)&&!P.done[i])?` \u00b7 <span class="dk-new">${p.ids.filter(i=>isFresh(i)&&!P.done[i]).length} new</span>`:''}</span><b>${esc(p.name)}</b></span>
       <span class="dk-m">${done===p.ids.length?'<span class="dk-done">Deck complete</span>':`<span>${done}/${p.ids.length} cards</span>`}<span class="dk-bar"><i style="width:${Math.round(done/p.ids.length*100)}%"></i></span></span>
       <span class="chev" aria-hidden="true"></span>
     </summary>
     <div class="dk-body"><p class="note">${esc(p.blurb)}</p>
-      ${p.ids.map(i=>{const s=STORIES[i];return `<button class="row" data-open="${i}">${mini(i,!P.done[i])}<span><span class="t">${esc(s.title)}</span><br><span class="k">${esc(s.who.name)} · ${esc(s.year)}</span></span><span class="pill ${P.done[i]?'done':'new'}">${P.done[i]?'Collected':'New'}</span></button>`}).join('')}
+      ${p.ids.map(i=>{const s=STORIES[i];return `<button class="row" data-open="${i}">${mini(i,!P.done[i])}<span><span class="t">${esc(s.title)}</span><br><span class="k">${esc(s.who.name)} · ${esc(s.year)}${requestedBy(i)?` · Requested by ${esc(requestedBy(i))}`:''}</span></span>${P.done[i]?'<span class="pill done">Collected</span>':isFresh(i)?'<span class="pill new">New</span>':'<span></span>'}</button>`}).join('')}
     </div>
   </details>`;
 }
 
 function renderHome(){
   const doneCount=ORDER.filter(i=>P.done[i]).length;
-  const next=ORDER.find(i=>!P.done[i]) || ORDER[(new Date().getDate())%ORDER.length];
+  const next=ORDER.find(i=>isFresh(i)&&!P.done[i]) || ORDER.find(i=>!P.done[i]) || ORDER[(new Date().getDate())%ORDER.length];
   const st=STORIES[next];
   const streak=currentStreak();
   const hand=ORDER.filter(i=>P.done[i]).slice(-4); while(hand.length<4) hand.push(null);
@@ -346,8 +427,10 @@ function renderHome(){
       <p>One card from history, five minutes a day.</p>
     </header>
     ${rankBlock()}
+    ${flashEntry()}
     <div class="stats" aria-label="Your progress">
       <span class="chip"><b>${streak}</b>-day streak</span>
+      <span class="chip shield ${shieldReady()?'':'used'}" title="Miss one day a week without losing your streak">Streak shield ${shieldReady()?'ready':'used this week'}</span>
       <span class="chip"><b>${P.xp}</b> XP</span>
       <span class="chip"><b>${doneCount}</b> of ${ORDER.length} cards</span>
     </div>
@@ -357,7 +440,7 @@ function renderHome(){
         ${plate(next)}
         <div class="body">
           <h2>${esc(st.title)}</h2>
-          <span class="kicker">Meet ${esc(st.who.name)}, ${esc(st.who.epithet.toLowerCase())}</span>
+          <span class="kicker">Meet ${esc(st.who.name)}, ${esc(st.who.epithet.toLowerCase())}${requestedBy(next)?`. Requested by ${esc(requestedBy(next))}`:''}</span>
           <span class="cta">${P.done[next]?'Read again':'Draw this card'} · 5 min</span>
         </div>
       </button>
@@ -430,8 +513,10 @@ function renderDone(){
   app.innerHTML=`<div class="finish">
     ${S.rankUp!=null?`<div class="rankup">${sealHTML(S.rankUp,84)}<span class="sc">Rank up!</span><b>You are now ${/^[AEIOU]/.test(RANKS[S.rankUp].name)?'an':'a'} ${esc(RANKS[S.rankUp].name)}</b><i>${esc(RANKS[S.rankUp].line)}</i></div>`:''}
     ${S.deckDone?`<p class="deckdone">You completed the ${esc(S.deckDone)} deck!</p>`:''}
+    ${S.shieldUsed?'<p class="shieldnote">Your streak shield saved your streak. You get a new one on Monday.</p>':''}
     <span class="sc">Card collected</span>
     ${pcard(S.id,{big:true})}
+    ${requestedBy(S.id)?`<p class="reqby">Requested by ${esc(requestedBy(S.id))}</p>`:''}
     <p class="score">${S.score} of ${st.quiz.length} correct · +${S.gained} XP · ${currentStreak()}-day streak</p>
     <div class="take"><span class="sc">The takeaway</span><p>${esc(st.take)}</p></div>
     <button class="cta" data-go="home">Back to the decks</button>
@@ -457,6 +542,8 @@ function render(){
   else if(S.view==='collection') renderCollection();
   else if(S.view==='join') renderJoin();
   else if(S.view==='ranks') renderRanks();
+  else if(S.view==='flash') renderFlash();
+  else if(S.view==='flashdone') renderFlashDone();
   window.scrollTo(0,0);
   paintArt(app);
 }
@@ -482,9 +569,7 @@ function finish(){
   const before=rankFor(cardsDone(P.done));
   const d=deckOf(S.id), deckWasDone=d.ids.every(i=>P.done[i]);
   const gained=S.score*10+(first?20:5);
-  P.done[S.id]=true; P.xp+=gained;
-  const today=localDay(0);
-  if(P.last!==today){ P.streak = (P.last===localDay(-1)) ? P.streak+1 : 1; P.last=today; }
+  P.done[S.id]=true; addXP(gained); playedToday();
   const after=rankFor(cardsDone(P.done));
   S.rankUp = after>before ? after : null;
   S.deckDone = (!deckWasDone && d.ids.every(i=>P.done[i])) ? d.name : null;
@@ -496,9 +581,12 @@ app.addEventListener('click',e=>{
   if(b.dataset.open){ open(b.dataset.open); return; }
   if(b.dataset.go){ stopSpeech(); S.view=b.dataset.go; render(); return; }
   if(b.dataset.pick!==undefined && S.picked===null){
-    S.picked=+b.dataset.pick; if(S.picked===STORIES[S.id].quiz[S.qi].a) S.score++; render(); return;
+    S.picked=+b.dataset.pick; if(S.picked===curQ().a) S.score++; render(); return;
   }
   const a=b.dataset.act; const st=S.id&&STORIES[S.id];
+  if(a==='flash'){ startFlash(); return; }
+  if(a==='fnext'){ if(S.fi<S.fq.length-1){ S.fi++; S.picked=null; render(); } else finishFlash(); return; }
+  if(a==='tab-week'||a==='tab-all'){ SH.tab=a==='tab-week'?'week':'all'; refreshShared(); return; }
   if(a==='solo'){ PROFILE={solo:true}; saveProfile(PROFILE); location.reload(); return; }
   if(a==='rejoin'){ stopSpeech(); S.view='join'; render(); return; }
   if(a==='close'){ stopSpeech(); S.view='home'; render(); }
