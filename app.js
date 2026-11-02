@@ -176,11 +176,10 @@ function boardHTML(){
   if(SH.state==='error') return '<p class="note">The scoreboard can’t be reached right now. Your progress is still saved on this device and will sync next time.</p>';
   const ids=Object.keys(SH.board).filter(id=>SH.board[id]&&SH.board[id].name);
   if(!ids.length) return '<p class="note">Nobody has collected a card yet. Be the first.</p>';
-  const wk=SH.tab==='week', score=d=>wk?weekXP(d):(d.xp||0);
-  ids.sort((a,b)=>score(SH.board[b])-score(SH.board[a]));
-  const tabs=`<div class="tabs" role="tablist"><button role="tab" aria-selected="${wk}" class="${wk?'on':''}" data-act="tab-week">This week</button><button role="tab" aria-selected="${!wk}" class="${wk?'':'on'}" data-act="tab-all">All time</button><span class="k">${wk?'Resets every Monday':''}</span></div>`;
-  return tabs+ids.map((id,i)=>{const d=SH.board[id]; const n=Object.keys(d.done||{}).filter(k=>STORIES[k]).length;
-    return `<div class="prow"><span class="rank">${i+1}</span>${initialAv(id)}<span><span class="pn">${esc(nameFor(id))}${id===SH.me?' (you)':''}</span><br><span class="ps">${esc(RANKS[rankFor(n)].name)} · ${n} cards · ${streakOf(d)}-day streak</span></span><span class="px">${score(d)} XP</span></div>`}).join('');
+  ids.sort((a,b)=>(weekXP(SH.board[b])-weekXP(SH.board[a]))||((SH.board[b].xp||0)-(SH.board[a].xp||0)));
+  const head=`<div class="bhead"><span>Ranked by this week \u00b7 resets every Monday</span><span>Week / All time</span></div>`;
+  return head+ids.map((id,i)=>{const d=SH.board[id]; const n=Object.keys(d.done||{}).filter(k=>STORIES[k]).length;
+    return `<div class="prow"><span class="rank">${i+1}</span>${initialAv(id)}<span><span class="pn">${esc(nameFor(id))}${id===SH.me?' (you)':''}</span><br><span class="ps">${esc(RANKS[rankFor(n)].name)} · ${n} card${n===1?'':'s'} · ${streakOf(d)}-day streak</span></span><span class="px2"><b>${weekXP(d)} XP</b><span>${d.xp||0} total</span></span></div>`}).join('');
 }
 function reqsHTML(){
   if(PROFILE&&PROFILE.solo) return '';
