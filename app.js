@@ -26,6 +26,36 @@ let S={view:'home', id:null, step:0, qi:0, picked:null, score:0, listening:false
 const app=document.getElementById('app');
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
+/* ---------- ranks ---------- */
+const RANKS=[
+  {n:0,   name:'Wanderer',       line:'Every historian starts somewhere.'},
+  {n:1,   name:'Apprentice',     line:'Your first card is in the deck.'},
+  {n:5,   name:'Scribe',         line:'You are writing history down.'},
+  {n:10,  name:'Chronicler',     line:'You keep the record of the ages.'},
+  {n:20,  name:'Archivist',      line:'Twenty cards strong. The archive is yours.'},
+  {n:35,  name:'Curator',        line:'Your collection belongs in a museum.'},
+  {n:50,  name:'Loremaster',     line:'Few know the past as well as you.'},
+  {n:75,  name:'Sage of Ages',   line:'Centuries bow to your knowledge.'},
+  {n:100, name:'Keeper of Time', line:'The hourglass answers to you.'}
+];
+const ROMAN=['I','II','III','IV','V','VI','VII','VIII','IX','X'];
+function cardsDone(done){ return Object.keys(done||{}).filter(k=>STORIES[k]).length; }
+function rankFor(n){ let i=0; RANKS.forEach((r,k)=>{ if(n>=r.n) i=k; }); return i; }
+function sealHTML(i,size){ return `<span class="seal" style="--s:${size||40}px" aria-hidden="true"><b>${ROMAN[i]}</b></span>`; }
+function rankBlock(){
+  const n=cardsDone(P.done), i=rankFor(n), r=RANKS[i], nx=RANKS[i+1];
+  const pct=nx?Math.round((n-r.n)/(nx.n-r.n)*100):100;
+  return `<button class="rank-card" data-go="ranks">${sealHTML(i,48)}<span class="rk"><span class="sc">Rank ${ROMAN[i]} of ${RANKS.length}</span><b>${esc(r.name)}</b><span class="rk-bar"><i style="width:${pct}%"></i></span><span class="rk-next">${nx?`${nx.n-n} more card${nx.n-n===1?'':'s'} to ${esc(nx.name)}`:'The highest rank of all'}</span></span><span class="chev-r" aria-hidden="true"></span></button>`;
+}
+function renderRanks(){
+  const n=cardsDone(P.done), cur=rankFor(n);
+  app.innerHTML=`<div class="wrap">
+    <button class="iconbtn back" data-go="home">← Decks</button>
+    <header class="mast"><h1 style="font-size:40px">The <span>ranks</span></h1><p>Collect cards to climb the ranks. You have ${n} card${n===1?'':'s'}.</p></header>
+    <ol class="ladder">${RANKS.map((r,i)=>`<li class="${i<cur?'got':i===cur?'now':'locked'}">${sealHTML(i,44)}<span><b>${esc(r.name)}</b><br><span class="k">${r.n===0?'Where everyone begins':`${r.n} card${r.n===1?'':'s'}`} · ${esc(r.line)}</span></span>${i===cur?'<span class="pill new">You</span>':i<cur?'<span class="pill done">Reached</span>':''}</li>`).join('')}</ol>
+  </div>`;
+}
+
 /* ---------- family scoreboard and requests (Firebase) ---------- */
 const FIREBASE_CONFIG={
   apiKey:"AIzaSyCgQYa4-Pdns68RJEufflgSr4G81FExk_0",
@@ -71,12 +101,13 @@ function boardHTML(){
   if(!ids.length) return '<p class="note">Nobody has collected a card yet. Be the first.</p>';
   ids.sort((a,b)=>(SH.board[b].xp||0)-(SH.board[a].xp||0));
   return ids.map((id,i)=>{const d=SH.board[id]; const n=Object.keys(d.done||{}).filter(k=>STORIES[k]).length;
-    return `<div class="prow"><span class="rank">${i+1}</span>${initialAv(id)}<span><span class="pn">${esc(nameFor(id))}${id===SH.me?' (you)':''}</span><br><span class="ps">${n} of ${ORDER.length} cards · ${streakOf(d)}-day streak</span></span><span class="px">${d.xp||0} XP</span></div>`}).join('');
+    return `<div class="prow"><span class="rank">${i+1}</span>${initialAv(id)}<span><span class="pn">${esc(nameFor(id))}${id===SH.me?' (you)':''}</span><br><span class="ps">${esc(RANKS[rankFor(n)].name)} · ${n} cards · ${streakOf(d)}-day streak</span></span><span class="px">${d.xp||0} XP</span></div>`}).join('');
 }
 function reqsHTML(){
   if(PROFILE&&PROFILE.solo) return '';
   if(SH.state!=='on'||!SH.reqs.length) return '';
-  return '<p class="sc" style="margin:14px 0 0">Requested so far</p>'+SH.reqs.slice(0,12).map(r=>`<div class="rq"><span class="tx">${esc(r.text)}</span><span class="by">${esc(nameFor(r.uid))} · ${esc(String(r.at).slice(0,10))}</span></div>`).join('');
+  return '<p class="sc" style="margin:14px 0 0">Requested so far</p>'+SH.reqs.slice(0,12).map(r=>{const made=(typeof FULFILLED!=='undefined')&&FULFILLED[r.id]&&STORIES[FULFILLED[r.id]]?FULFILLED[r.id]:null;
+    return `<div class="rq${made?' made':''}"><span class="tx">${esc(r.text)}</span><span class="by">${esc(nameFor(r.uid))} · ${esc(String(r.at).slice(0,10))}</span>${made?`<button class="added" data-open="${made}"><span aria-hidden="true">✓</span> Added as a card: ${esc(STORIES[made].title)}</button>`:''}</div>`;}).join('');
 }
 function refreshShared(){
   if(S.view!=='home') return;
@@ -122,7 +153,7 @@ async function initShared(){
       const b={}; qs.forEach(d=>{ b[d.id]=d.data(); }); SH.board=b; refreshShared();
     },()=>{ SH.state='error'; refreshShared(); });
     fs.onSnapshot(fs.query(fs.collection(db,'families',PROFILE.code,'requests'),fs.orderBy('at','desc'),fs.limit(30)),qs=>{
-      SH.reqs=qs.docs.map(d=>d.data()); refreshShared();
+      SH.reqs=qs.docs.map(d=>Object.assign({id:d.id},d.data())); refreshShared();
     },()=>{});
     if(S.view==='home') render();
   }catch(e){ console.warn('Scoreboard unavailable',e); clearTimeout(timer); SH.state='error'; refreshShared(); }
@@ -293,7 +324,7 @@ function deckHTML(p){
   return `<details class="deck" data-deck="${p.id}"${OPEN.has(p.id)?' open':''}>
     <summary>${artCanvas(p.art,'deck-'+p.id,'')}
       <span class="dk-t"><span class="sc">Deck</span><b>${esc(p.name)}</b></span>
-      <span class="dk-m"><span>${done}/${p.ids.length} cards</span><span class="dk-bar"><i style="width:${Math.round(done/p.ids.length*100)}%"></i></span></span>
+      <span class="dk-m">${done===p.ids.length?'<span class="dk-done">Deck complete</span>':`<span>${done}/${p.ids.length} cards</span>`}<span class="dk-bar"><i style="width:${Math.round(done/p.ids.length*100)}%"></i></span></span>
       <span class="chev" aria-hidden="true"></span>
     </summary>
     <div class="dk-body"><p class="note">${esc(p.blurb)}</p>
@@ -314,6 +345,7 @@ function renderHome(){
       ${BRAND_HTML}
       <p>One card from history, five minutes a day.</p>
     </header>
+    ${rankBlock()}
     <div class="stats" aria-label="Your progress">
       <span class="chip"><b>${streak}</b>-day streak</span>
       <span class="chip"><b>${P.xp}</b> XP</span>
@@ -396,6 +428,8 @@ function renderStory(){
 function renderDone(){
   const st=STORIES[S.id];
   app.innerHTML=`<div class="finish">
+    ${S.rankUp!=null?`<div class="rankup">${sealHTML(S.rankUp,84)}<span class="sc">Rank up!</span><b>You are now ${/^[AEIOU]/.test(RANKS[S.rankUp].name)?'an':'a'} ${esc(RANKS[S.rankUp].name)}</b><i>${esc(RANKS[S.rankUp].line)}</i></div>`:''}
+    ${S.deckDone?`<p class="deckdone">You completed the ${esc(S.deckDone)} deck!</p>`:''}
     <span class="sc">Card collected</span>
     ${pcard(S.id,{big:true})}
     <p class="score">${S.score} of ${st.quiz.length} correct · +${S.gained} XP · ${currentStreak()}-day streak</p>
@@ -422,6 +456,7 @@ function render(){
   else if(S.view==='done') renderDone();
   else if(S.view==='collection') renderCollection();
   else if(S.view==='join') renderJoin();
+  else if(S.view==='ranks') renderRanks();
   window.scrollTo(0,0);
   paintArt(app);
 }
@@ -444,10 +479,15 @@ function open(id){ stopSpeech(); S={view:'story',id,step:0,qi:0,picked:null,scor
 function finish(){
   const st=STORIES[S.id];
   const first=!P.done[S.id];
+  const before=rankFor(cardsDone(P.done));
+  const d=deckOf(S.id), deckWasDone=d.ids.every(i=>P.done[i]);
   const gained=S.score*10+(first?20:5);
   P.done[S.id]=true; P.xp+=gained;
   const today=localDay(0);
   if(P.last!==today){ P.streak = (P.last===localDay(-1)) ? P.streak+1 : 1; P.last=today; }
+  const after=rankFor(cardsDone(P.done));
+  S.rankUp = after>before ? after : null;
+  S.deckDone = (!deckWasDone && d.ids.every(i=>P.done[i])) ? d.name : null;
   save(); S.gained=gained; S.view='done'; render(); pushProgress();
 }
 

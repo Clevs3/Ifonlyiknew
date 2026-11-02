@@ -496,3 +496,8 @@ const STORIES = {
     take:'Mix the team. Bletchley cracked a problem no single expert could by putting mathematicians, linguists and puzzle-solvers in one place with one shared goal.'
   }
 };
+
+/* Requests that have become cards: request ID (from Firebase, families/<code>/requests) -> card id in STORIES.
+   Those requests show a tick and an "Added as a card" link in the app. */
+const FULFILLED = {
+};
