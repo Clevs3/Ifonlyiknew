@@ -71,8 +71,15 @@ Object.assign(ICONS,{
   note:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="1.5"/><circle cx="12" cy="12" r="3"/><path d="M5.5 9v6M18.5 9v6"/></svg>'
 });
 
+Object.assign(ICONS,{
+  flag:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V3.5"/><path d="M5 4h14v9H5"/><path d="M9.7 4v9M14.3 4v9M5 8.5h14"/><path d="M5 4h4.7v4.5H5zM14.3 4H19v4.5h-4.7zM9.7 8.5h4.6V13H9.7z" fill="currentColor" stroke="none"/></svg>'
+});
+
 /* What each chapter's picture shows: [icon, caption] */
 const PICS = {
+  rollsroyce:[['car','Royce\u2019s first car, 1904'],['people','Charles Rolls, car dealer'],['house','The Midland Hotel, Manchester'],['trophy','The Silver Ghost'],['plane','The Merlin engine']],
+  mini:[['drop','Petrol rationing, 1956'],['scroll','The design brief'],['gear','The sideways engine'],['car','Austin Seven and Morris Mini-Minor'],['trophy','The Monte Carlo Rally']],
+  thrustssc:[['medal','Thrust2, 1983'],['plane','Two Spey jet engines'],['shield','RAF pilot Andy Green'],['burst','The sonic boom'],['flag','A record that still stands']],
   toyoda:[['loom','A hand loom, Shizuoka'],['thread','A single broken thread'],['gear','The Type G automatic loom, 1924'],['stop','Jidoka: stop, fix, restart'],['car','Toyota Motor Co., 1937']],
   snow:[['drop','Cholera'],['door','Snow’s door-to-door survey'],['map','Snow’s cholera map'],['tankard','The Lion Brewery'],['pump','The Broad Street pump']],
   nightingale:[['arches','Barracks hospital, Scutari'],['germ','Cholera, typhus and dysentery'],['book','Nightingale’s records'],['rose','The rose diagram'],['medal','Royal Statistical Society, 1858']],
@@ -94,6 +101,38 @@ const PICS = {
 const loop=(n,f)=>Array.from({length:n},(_,i)=>f(i)).join('');
 const svgOpen='<svg viewBox="0 0 400 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">';
 const SCENES = {
+  rollsroyce:()=>svgOpen+`
+    <g fill="rgba(20,22,28,.55)"><rect x="300" y="40" width="16" height="120"/><rect x="330" y="70" width="14" height="90"/><path d="M250 160V110l25-14 25 14v50zM350 160V100l25-14 25 14v60z"/></g>
+    <path d="M296 40c4-14 18-16 24-28" stroke="rgba(255,255,255,.25)" stroke-width="6" fill="none" stroke-linecap="round"/>
+    <rect y="168" width="400" height="32" fill="rgba(20,22,28,.45)"/>
+    <g stroke="rgba(235,230,215,.9)" stroke-width="3" fill="none"><circle cx="110" cy="150" r="24"/><circle cx="230" cy="150" r="24"/></g>
+    <g stroke="rgba(235,230,215,.6)" stroke-width="1.5">${loop(8,i=>{const a=i*Math.PI/4;return `<path d="M${110} 150l${(Math.cos(a)*22).toFixed(1)} ${(Math.sin(a)*22).toFixed(1)}M${230} 150l${(Math.cos(a)*22).toFixed(1)} ${(Math.sin(a)*22).toFixed(1)}"/>`})}</g>
+    <path d="M70 130h40l10-14h70l14-26h22l6 26h22v14H70z" fill="rgba(200,205,215,.92)"/>
+    <rect x="236" y="104" width="22" height="26" rx="2" fill="rgba(235,225,190,.95)"/>
+    <path d="M240 108v18M245 108v18M250 108v18M254 108v18" stroke="rgba(120,110,80,.6)" stroke-width="1"/>
+    <path d="M120 116c10-16 30-20 50-20" stroke="rgba(60,50,40,.7)" stroke-width="5" fill="none"/>
+    <circle cx="262" cy="118" r="5" fill="rgba(255,220,140,.95)"/></svg>`,
+  mini:()=>svgOpen+`
+    <g fill="rgba(20,16,18,.5)"><path d="M0 120l30-18v18l30-18v18l30-18v18l30-18v18l30-18v18l30-18v18l30-18v18l30-18v18l30-18v18l30-18v18l30-18v18l30-18v18l10-6V170H0z"/></g>
+    <rect x="345" y="50" width="14" height="70" fill="rgba(20,16,18,.5)"/>
+    <rect y="170" width="400" height="30" fill="rgba(30,30,36,.6)"/>
+    <path d="M0 184h40M70 184h40M140 184h40M210 184h40M280 184h40M350 184h40" stroke="rgba(255,240,200,.5)" stroke-width="3"/>
+    <path d="M118 160h170q10 0 10-12v-14q0-8-8-10l-26-6q-14-28-40-30h-48q-26 2-40 30l-20 6q-8 2-8 10v14q0 12 10 12z" fill="rgba(200,40,40,.95)"/>
+    <path d="M150 116q12-22 34-23h44q22 1 34 23z" fill="rgba(245,245,240,.95)"/>
+    <path d="M160 116q10-16 26-17h18v17zM212 99h16q16 1 26 17h-42z" fill="rgba(140,180,210,.85)"/>
+    <circle cx="150" cy="160" r="15" fill="rgba(20,20,22,.95)"/><circle cx="262" cy="160" r="15" fill="rgba(20,20,22,.95)"/>
+    <circle cx="150" cy="160" r="6" fill="rgba(200,200,205,.9)"/><circle cx="262" cy="160" r="6" fill="rgba(200,200,205,.9)"/>
+    <circle cx="294" cy="132" r="5" fill="rgba(255,240,190,.95)"/></svg>`,
+  thrustssc:()=>svgOpen+`
+    <path d="M0 120L40 96L80 110L130 80L190 112L240 90L300 108L350 84L400 100V140H0z" fill="rgba(40,20,40,.45)"/>
+    <rect y="138" width="400" height="62" fill="rgba(240,220,190,.35)"/>
+    <g stroke="rgba(255,255,255,.35)" stroke-width="2" fill="none"><path d="M330 120L230 70M330 120L230 170"/><path d="M345 120L250 60M345 120L250 180" stroke-opacity=".6"/></g>
+    <path d="M20 150C80 140 120 150 160 146" stroke="rgba(240,220,190,.6)" stroke-width="14" fill="none" stroke-linecap="round"/>
+    <path d="M150 140h150l40-12-40-10H190l-40 10z" fill="rgba(30,30,40,.92)"/>
+    <rect x="200" y="112" width="60" height="12" rx="6" fill="rgba(60,60,70,.95)"/><rect x="200" y="140" width="60" height="12" rx="6" fill="rgba(60,60,70,.95)"/>
+    <path d="M150 124l-18-14h24z" fill="rgba(30,30,40,.92)"/>
+    <path d="M196 118h-14M196 146h-14" stroke="rgba(255,170,80,.9)" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="300" cy="128" r="4" fill="rgba(150,200,240,.9)"/></svg>`,
   toyoda:()=>svgOpen+`
     <circle cx="330" cy="46" r="24" fill="rgba(255,236,210,.3)"/>
     <path d="M150 200 L243 98 Q256 88 269 98 L390 200Z" fill="rgba(25,10,8,.24)"/>
@@ -236,10 +275,62 @@ const PATHS = [
   {id:'crowns', art:'glass', name:'Crowns and Conquest', blurb:'Kings, queens and the fights for Britain.', ids:['oswald','boudica','hastings']},
   {id:'odds', art:'storm', name:'Against the Odds', blurb:'When the plan fails, and the people do not.', ids:['apollo','endurance']},
   {id:'space', art:'space', name:'Into Space', blurb:'The first people and machines beyond the sky.', ids:['gagarin','apollo11','hubble','sharman']},
-  {id:'war', art:'dusk', name:'Britain at War', blurb:'1940, and the people who held the line.', ids:['battle','mitchell','bletchley']}
+  {id:'war', art:'dusk', name:'Britain at War', blurb:'1940, and the people who held the line.', ids:['battle','mitchell','bletchley']},
+  {id:'speed', art:'speed', name:'Speed and Machines', blurb:'Cars, engines and record breakers.', ids:['rollsroyce','mini','thrustssc']}
 ];
 
 const STORIES = {
+  rollsroyce:{
+    title:'A Meeting in Manchester', place:'Manchester', year:'1904', icon:'gear', era:'#5a6b7a', added:'2026-11-03',
+    who:{name:'Henry Royce', epithet:'The engineer behind Rolls-Royce', dates:'1863 to 1933', initials:'HR'},
+    cards:[
+      {h:"Never good enough", t:"Henry Royce is an electrical engineer in Manchester. He buys a second-hand French car and is unimpressed by how badly it is made, so he decides to build his own. His first car runs in 1904."},
+      {h:"The salesman", t:"Charles Rolls is a wealthy young car dealer and racing driver from London. He is looking for a well-made British car to sell, and a friend arranges for the two men to meet."},
+      {h:"Lunch at the Midland Hotel", t:"On 4 May 1904, Rolls and Royce meet at the Midland Hotel in Manchester. Rolls is so impressed by Royce's car that he agrees to sell every car Royce can build, under the name Rolls-Royce."},
+      {h:"The best car in the world", t:"Rolls-Royce Limited is formed in 1906. Its Silver Ghost runs almost 15,000 miles in a 1907 trial with hardly a problem, and earns a reputation as the best car in the world."},
+      {h:"Wings", t:"In 1910 Rolls is killed flying at an air show in Bournemouth, the first Briton to die in a powered aeroplane accident. The company turns to aero engines, and its Merlin engine later powers the Spitfire and the Hurricane."}
+    ],
+    quiz:[
+      {q:'Where did Rolls and Royce first meet?', o:['Brooklands racetrack','The Midland Hotel, Manchester','A London motor show','Bournemouth air show'], a:1, why:'They met over lunch on 4 May 1904, and a famous partnership began.'},
+      {q:'What was Charles Rolls\u2019s job when they met?', o:['Car dealer and racing driver','Banker','Electrical engineer','Newspaper owner'], a:0, why:'Royce was the engineer. Rolls was the one who sold the cars.'},
+      {q:'Which Rolls-Royce engine powered the Spitfire and the Hurricane?', o:['The Pegasus','The Jupiter','The Merlin','The Gipsy'], a:2, why:'The Merlin. The other three were made by other companies.'}
+    ],
+    take:'Quality sells. Royce refused to accept good enough, and that obsession became a name people still pay extra for over a century later.'
+  },
+  mini:{
+    title:'The Mini', place:'Longbridge, Birmingham', year:'1959', icon:'car', era:'#b33a3a', added:'2026-11-03',
+    who:{name:'Alec Issigonis', epithet:'Designer of the Mini', dates:'1906 to 1988', initials:'AI'},
+    cards:[
+      {h:"A fuel crisis", t:"In 1956 the Suez Crisis cuts Britain's oil supplies and petrol is rationed. Big, thirsty cars suddenly look foolish, and tiny German bubble cars start selling well."},
+      {h:"The brief", t:"Leonard Lord, head of the British Motor Corporation, gives his designer Alec Issigonis a clear brief: a proper car for four adults that is as small and economical as possible."},
+      {h:"Turning the engine sideways", t:"Issigonis mounts the engine sideways and makes it drive the front wheels. He pushes tiny 10-inch wheels right out to the corners, which leaves about 80 per cent of the car's floor for people and luggage."},
+      {h:"Launch day", t:"The Mini goes on sale on 26 August 1959, as the Austin Seven and the Morris Mini-Minor, for just under five hundred pounds. Its go-kart handling soon makes it a favourite with rally drivers too."},
+      {h:"Monte Carlo and beyond", t:"Mini Coopers win the Monte Carlo Rally in 1964, 1965 and 1967. When production at Longbridge finally ends in 2000, more than 5.3 million have been built."}
+    ],
+    quiz:[
+      {q:'Which crisis led to the Mini being designed?', o:['The Suez Crisis','The Three-Day Week','The Cuban Missile Crisis','The General Strike'], a:0, why:'Petrol rationing after Suez made small, economical cars suddenly very attractive.'},
+      {q:'What was clever about the Mini\u2019s engine?', o:['It sat in the boot','It ran on electricity','It was mounted sideways and drove the front wheels','It had twelve cylinders'], a:2, why:'That layout freed up space inside. Most small cars are still built that way today.'},
+      {q:'Which famous rally did Mini Coopers win three times?', o:['The Le Mans 24 Hours','The Monte Carlo Rally','The Isle of Man TT','The Paris to Dakar'], a:1, why:'Wins in 1964, 1965 and 1967 turned a small family car into a motorsport legend.'}
+    ],
+    take:'Constraints breed creativity. A fuel crisis and a tight brief forced a design so clever that most small cars still copy its layout.'
+  },
+  thrustssc:{
+    title:'Faster Than Sound', place:'Black Rock Desert, Nevada', year:'1997', icon:'flag', era:'#8a5a9a', added:'2026-11-03',
+    who:{name:'Andy Green', epithet:'The fastest man on land', dates:'born 1962', initials:'AG'},
+    cards:[
+      {h:"The record hunters", t:"Richard Noble already holds the world land speed record, set in his jet car Thrust2 in 1983 at 633 miles an hour. In the 1990s he sets out to do something nobody has ever done: drive faster than the speed of sound."},
+      {h:"Two jet engines", t:"His new car, Thrust SSC, is powered by two Rolls-Royce Spey jet engines from a Phantom fighter. It is about 16.5 metres long, weighs around 10 tonnes and produces roughly 110,000 horsepower."},
+      {h:"The driver", t:"The driver is Andy Green, an RAF fighter pilot. At those speeds, steering is done with tiny, careful movements, and the team builds up speed run by run, checking the data every time."},
+      {h:"The sonic boom", t:"On 15 October 1997, in Nevada's Black Rock Desert, Green averages 763 miles an hour over two runs. Thrust SSC becomes the first land vehicle to officially break the sound barrier, and its sonic boom rolls across the desert."},
+      {h:"Fifty years and a day", t:"The record comes 50 years and one day after Chuck Yeager first broke the sound barrier in an aircraft. Nobody has driven faster on land since."}
+    ],
+    quiz:[
+      {q:'What powered Thrust SSC?', o:['A rocket motor','Two Rolls-Royce Spey jet engines','A V12 car engine','Electric motors'], a:1, why:'The same engines that powered the Phantom fighter jet.'},
+      {q:'What was Andy Green\u2019s day job?', o:['Racing driver','Engineer','RAF fighter pilot','Astronaut'], a:2, why:'A fighter pilot\u2019s skills suited a car that behaved more like a jet.'},
+      {q:'What speed did Thrust SSC average for the record?', o:['1,000 miles an hour','633 miles an hour','500 miles an hour','763 miles an hour'], a:3, why:'633 was Thrust2\u2019s old record. 763 broke the sound barrier.'}
+    ],
+    take:'Edge towards a huge goal in steps you can learn from. The team raised the speed run by run and checked the data each time, rather than gambling on one big attempt.'
+  },
   toyoda:{
     title:'The Loom That Stopped Itself', place:'Japan', year:'1924', icon:'gear', era:'#c8553d',
     who:{name:'Sakichi Toyoda', epithet:'Inventor of jidoka', dates:'1867 to 1930', initials:'ST'},

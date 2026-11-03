@@ -193,7 +193,7 @@ function renderFlash(){
 function finishFlash(){
   const today=localDay(0), first=P.flash!==today;
   const bonus=first?S.score*5:0;
-  P.flash=today; addXP(bonus); playedToday(); save(); pushProgress();
+  P.flash=today; addXP(bonus); playedToday(); save(); pushProgress(); SFX.collect();
   S.bonus=bonus; S.flashFirst=first; S.view='flashdone'; render();
 }
 function renderFlashDone(){
@@ -241,7 +241,8 @@ const BRAND_HTML=`<span class="sc eyebrow">A deck of history</span>
 function streakOf(d){ return d&&streakAlive(d.last,d.freeze)?(d.streak||0):0; }
 function nameFor(uid){ const d=SH.board[uid]; return (d&&d.name) || (uid===SH.me?'You':'Someone'); }
 function initialAv(uid){
-  const n=nameFor(uid), h=hashStr(uid)%360;
+  const d=SH.board[uid], n=nameFor(uid), h=hashStr(uid)%360, e=d&&d.emblem;
+  if(e&&EMBLEMS.some(x=>x[0]===e)) return `<span class="av emb-av" style="background:hsl(${h} 40% 30%)" title="${esc(n)}">${ICONS[e]}</span>`;
   return `<span class="av" style="background:hsl(${h} 45% 40%)">${esc(n.charAt(0).toUpperCase())}</span>`;
 }
 function boardHTML(){
@@ -251,7 +252,8 @@ function boardHTML(){
   const ids=Object.keys(SH.board).filter(id=>SH.board[id]&&SH.board[id].name);
   if(!ids.length) return '<p class="note">Nobody has collected a card yet. Be the first.</p>';
   ids.sort((a,b)=>(weekXP(SH.board[b])-weekXP(SH.board[a]))||((SH.board[b].xp||0)-(SH.board[a].xp||0)));
-  const head=`<div class="bhead"><span>Ranked by this week \u00b7 resets every Monday</span><span>Week / All time</span></div>`;
+  const nudge=SH.me&&!PROFILE.emblem?'<p class="note nudge"><button class="textbtn" data-act="rejoin">Pick your emblem</button> to show next to your name.</p>':'';
+  const head=nudge+`<div class="bhead"><span>Ranked by this week \u00b7 resets every Monday</span><span>Week / All time</span></div>`;
   return head+ids.map((id,i)=>{const d=SH.board[id]; const n=Object.keys(d.done||{}).filter(k=>STORIES[k]).length;
     return `<div class="prow"><span class="rank">${i+1}</span>${initialAv(id)}<span><span class="pn">${esc(nameFor(id))}${id===SH.me?' (you)':''}</span><br><span class="ps">${esc(RANKS[rankFor(n)].name)} · ${n} card${n===1?'':'s'} · ${streakOf(d)}-day streak</span></span><span class="px2"><b>${weekXP(d)} XP</b><span>${d.xp||0} total</span></span></div>`}).join('');
 }
@@ -274,7 +276,7 @@ function queueWrite(fn){
 function pushProgress(){
   if(SH.state!=='on'||!SH.me||!PROFILE||PROFILE.solo) return Promise.resolve();
   const fs=SH.fs;
-  const body={name:PROFILE.name, done:Object.assign({},P.done), xp:P.xp||0, streak:P.streak||0, last:P.last||null, week:P.week||null, freeze:P.freezeWeek||null, updated:new Date().toISOString()};
+  const body={name:PROFILE.name, emblem:PROFILE.emblem||null, done:Object.assign({},P.done), xp:P.xp||0, streak:P.streak||0, last:P.last||null, week:P.week||null, freeze:P.freezeWeek||null, updated:new Date().toISOString()};
   return queueWrite(()=>fs.setDoc(fs.doc(SH.db,'families',PROFILE.code,'players',SH.me),body));
 }
 async function initShared(){
@@ -327,6 +329,7 @@ function renderJoin(){
         <input id="jname" class="field" maxlength="30" autocomplete="given-name" value="${esc(p.name||'')}">
         <label class="sc" for="jcode">Family code</label>
         <input id="jcode" class="field" maxlength="40" autocapitalize="none" autocomplete="off" spellcheck="false" value="${esc(p.code||'')}">
+        ${emblemPicker(p.emblem)}
         <p class="note" id="jmsg" style="padding:0"></p>
         <button class="cta" type="submit" style="align-self:flex-start">Start playing</button>
       </form>
@@ -335,6 +338,136 @@ function renderJoin(){
     <p class="foot">Only your first name and your scores are shared, and only with people who have your family code.</p>
   </div>`;
 }
+
+/* ---------- sound and vibration ---------- */
+let SOUND=(()=>{ try{ return localStorage.getItem('ioik-sound')!=='off'; }catch(e){ return true; } })();
+let AC=null;
+function audio(){ if(!AC){ try{ AC=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){ return null; } } if(AC.state==='suspended') AC.resume(); return AC; }
+function tone(f,t0,dur,type,vol){
+  const c=audio(); if(!c) return;
+  const o=c.createOscillator(), g=c.createGain(), t=c.currentTime+t0;
+  o.type=type||'sine'; o.frequency.value=f;
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(vol||.15,t+.012); g.gain.exponentialRampToValueAtTime(.0001,t+dur);
+  o.connect(g); g.connect(c.destination); o.start(t); o.stop(t+dur+.05);
+}
+function swish(){
+  const c=audio(); if(!c) return;
+  const len=Math.floor(c.sampleRate*.13), buf=c.createBuffer(1,len,c.sampleRate), d=buf.getChannelData(0);
+  for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.5);
+  const src=c.createBufferSource(), f=c.createBiquadFilter(), g=c.createGain();
+  src.buffer=buf; f.type='bandpass'; f.frequency.value=2200; f.Q.value=.8; g.gain.value=.22;
+  src.connect(f); f.connect(g); g.connect(c.destination); src.start();
+}
+function buzz(p){ try{ if(SOUND&&navigator.vibrate) navigator.vibrate(p); }catch(e){} }
+const SFX={
+  flip(){ if(SOUND) swish(); },
+  right(){ if(!SOUND) return; tone(660,0,.16,'triangle',.16); tone(990,.08,.3,'triangle',.14); buzz(25); },
+  wrong(){ if(!SOUND) return; tone(233,0,.28,'sine',.12); buzz([15,50,15]); },
+  collect(){ if(!SOUND) return; [523,659,784].forEach((f,i)=>tone(f,i*.08,.55,'triangle',.12)); buzz(40); },
+  rankup(){ if(!SOUND) return; [523,659,784,1047].forEach((f,i)=>tone(f,i*.12,.7,'triangle',.14)); buzz([40,60,40,60,140]); }
+};
+function toggleSound(){ SOUND=!SOUND; try{ localStorage.setItem('ioik-sound',SOUND?'on':'off'); }catch(e){} if(SOUND) SFX.right(); }
+
+/* ---------- on this day (Wikipedia) ---------- */
+let OTD=null;
+function otdHTML(){
+  if(!OTD) return '';
+  return `<a class="otd" href="${esc(OTD.url||'https://en.wikipedia.org/wiki/Wikipedia:Selected_anniversaries')}" target="_blank" rel="noopener"><span class="sc">On this day in ${esc(OTD.year)}</span><span class="otd-t">${esc(OTD.text)}</span><span class="otd-s">From Wikipedia ↗</span></a>`;
+}
+async function loadOnThisDay(){
+  const d=new Date(), mm=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0'), key='ioik-otd-'+d.getFullYear()+mm+dd;
+  try{ const c=JSON.parse(localStorage.getItem(key)); if(c){ OTD=c; refreshOTD(); return; } }catch(e){}
+  try{
+    const r=await fetch(`https://en.wikipedia.org/api/rest_v1/feed/onthisday/selected/${mm}/${dd}`);
+    if(!r.ok) return;
+    const j=await r.json();
+    const grim=/kill|dead|death|dies|died|massacre|bomb|murder|attack|shoot|terror|genocide|execut|assassin|suicide|rape|explosion|crash|disaster|riot|hostage|slaughter|lynch|torture|abuse|war crime|casualt|wounded|sink|sank|famine|plague|earthquake|tsunami|hurricane/i;
+    const ok=(j.selected||[]).filter(e=>e&&e.text&&typeof e.year==='number'&&e.text.length<260&&!grim.test(e.text));
+    if(!ok.length) return;
+    const uk=ok.filter(e=>/Brit|England|English|United Kingdom|\bUK\b|London|Scotland|Scottish|Wales|Welsh|Ireland|Irish/i.test(e.text));
+    const pool=uk.length?uk:ok, pick=pool[hashStr(mm+dd)%pool.length], page=(pick.pages||[])[0];
+    OTD={year:String(pick.year), text:pick.text, url:page&&page.content_urls&&page.content_urls.mobile&&page.content_urls.mobile.page};
+    try{ Object.keys(localStorage).filter(k=>k.startsWith('ioik-otd-')).forEach(k=>localStorage.removeItem(k)); localStorage.setItem(key,JSON.stringify(OTD)); }catch(e){}
+    refreshOTD();
+  }catch(e){}
+}
+function refreshOTD(){ const el=document.getElementById('otd'); if(el) el.innerHTML=otdHTML(); }
+
+/* ---------- emblems ---------- */
+const EMBLEMS=[['raven','Raven'],['rocket','Rocket'],['crown','Crown'],['plane','Spitfire'],['ship','Ship'],['lamp','Lamp'],['gear','Gear'],['shield','Shield'],['wheel','Chariot wheel'],['tree','Oak tree'],['trophy','Trophy'],['galaxy','Galaxy'],['car','Mini'],['flag','Chequered flag'],['enigma','Enigma machine'],['tankard','Tankard']];
+let PICKED_EMBLEM=null;
+function emblemPicker(cur){
+  PICKED_EMBLEM=cur||null;
+  return `<fieldset class="emblems"><legend class="sc">Pick your emblem</legend><div class="emb-grid">${EMBLEMS.map(([k,n])=>`<button type="button" class="emb${cur===k?' on':''}" data-emb="${k}" aria-label="${n}" aria-pressed="${cur===k}" title="${n}">${ICONS[k]}</button>`).join('')}</div></fieldset>`;
+}
+
+/* ---------- timeline ---------- */
+function yearNum(id){ const y=String(STORIES[id].year), m=y.match(/\d+/), n=m?parseInt(m[0],10):0; return /\bBC/i.test(y)?-n:n; }
+const ERAS=[[-99999,499,'Ancient and Roman'],[500,1499,'Medieval'],[1500,1799,'Tudors to Georgians'],[1800,1899,'The 1800s'],[1900,1999,'The 1900s'],[2000,99999,'Since 2000']];
+function renderTimeline(){
+  const ids=[...ORDER].sort((a,b)=>yearNum(a)-yearNum(b)), n=cardsDone(P.done);
+  let html='';
+  ERAS.forEach(([lo,hi,name])=>{
+    const here=ids.filter(i=>yearNum(i)>=lo&&yearNum(i)<=hi); if(!here.length) return;
+    html+=`<li class="tl-era"><span class="sc">${name}</span></li>`+here.map(i=>{const s=STORIES[i], got=!!P.done[i];
+      return `<li class="tl-item${got?' got':''}"><span class="tl-year">${esc(s.year)}</span><span class="tl-dot" aria-hidden="true"></span><button class="tl-card" data-open="${i}">${mini(i,!got)}<span><b>${got?esc(s.title):'Not collected yet'}</b><br><span class="k">${got?esc(s.who.name):esc(deckOf(i).name)+' deck'}</span></span></button></li>`;}).join('');
+  });
+  app.innerHTML=`<div class="wrap">
+    <button class="iconbtn back" data-go="home">← Decks</button>
+    <header class="mast"><h1 style="font-size:40px">Your <span>timeline</span></h1><p>${n} of ${ORDER.length} cards placed in history. Tap any card to play it.</p></header>
+    <ol class="timeline">${html}</ol>
+  </div>`;
+}
+
+/* ---------- share your score ---------- */
+function toast(msg){
+  let t=document.getElementById('toast'); if(!t){ t=document.createElement('div'); t.id='toast'; t.className='toast'; t.setAttribute('role','status'); document.body.appendChild(t); }
+  t.textContent=msg; t.classList.add('on'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('on'),3200);
+}
+function wrapText(x,text,maxW){ const words=String(text).split(' '), lines=[]; let line=''; words.forEach(w=>{ const t=line?line+' '+w:w; if(x.measureText(t).width>maxW&&line){ lines.push(line); line=w; } else line=t; }); if(line) lines.push(line); return lines; }
+async function scoreImage(id,score,total){
+  const W=1080, H=1350, AH=Math.round(H*.58), st=STORIES[id];
+  const c=document.createElement('canvas'); c.width=W; c.height=H; const x=c.getContext('2d');
+  try{ await document.fonts.ready; }catch(e){}
+  ART[artOf(id)](x,W,AH,rng(hashStr(id+'-share')));
+  if(tintFor(id)){ x.globalAlpha=.3; x.fillStyle=st.era; x.fillRect(0,0,W,AH); x.globalAlpha=1; }
+  await new Promise(res=>{
+    const svg=SCENES[id]().replace('<svg ',`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${AH}" `);
+    const img=new Image(); img.onload=()=>{ x.drawImage(img,0,0,W,AH); res(); }; img.onerror=()=>res();
+    img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
+  });
+  const g=x.createLinearGradient(0,AH*.55,0,AH); g.addColorStop(0,'rgba(21,24,39,0)'); g.addColorStop(1,'rgba(21,24,39,1)'); x.fillStyle=g; x.fillRect(0,AH*.55,W,AH*.45);
+  x.fillStyle='#151827'; x.fillRect(0,AH,W,H-AH);
+  x.strokeStyle='#d6a64f'; x.lineWidth=6; x.strokeRect(24,24,W-48,H-48);
+  const serif="'IM Fell English', Georgia, serif";
+  x.fillStyle='#fff8e8'; x.font=`64px ${serif}`; x.fillText(st.year,70,AH-70);
+  x.font=`italic 44px ${serif}`; x.fillText(st.who.name,70,AH-20);
+  x.textAlign='center';
+  x.fillStyle='#d6a64f'; x.font=`italic 52px ${serif}`; x.fillText('If only I knew',W/2,AH+90);
+  x.fillStyle='#fff8e8'; x.font=`180px ${serif}`; x.fillText(`${score}/${total}`,W/2,AH+280);
+  x.font=`48px ${serif}`; wrapText(x,`on “${st.title}”`,W-160).slice(0,2).forEach((l,i)=>x.fillText(l,W/2,AH+360+i*58));
+  x.fillStyle='#d6a64f'; x.font=`italic 54px ${serif}`; x.fillText('Can you beat me?',W/2,H-118);
+  x.fillStyle='#a8a192'; x.font=`30px ${serif}`; x.fillText((location.host+location.pathname).replace(/index\.html$/,'').replace(/\/$/,''),W/2,H-62);
+  return await new Promise((res,rej)=>c.toBlob(b=>b?res(b):rej(new Error('no image')),'image/png'));
+}
+function prepShare(){
+  const id=S.id, sc=S.score, tot=STORIES[id].quiz.length; S.shareFile=null;
+  scoreImage(id,sc,tot).then(b=>{ if(S.view==='done'&&S.id===id) S.shareFile=new File([b],'if-only-i-knew-score.png',{type:'image/png'}); }).catch(()=>{});
+}
+async function shareScore(){
+  const st=STORIES[S.id], total=st.quiz.length, url=location.origin+location.pathname;
+  const text=`I got ${S.score}/${total} on “${st.title}” in If Only I Knew. Can you beat me? ${url}`;
+  const btn=document.querySelector('[data-act="share"]'); if(btn){ btn.disabled=true; btn.textContent='Preparing…'; }
+  try{
+    const file=S.shareFile;
+    if(file&&navigator.canShare&&navigator.canShare({files:[file]})){ await navigator.share({files:[file],text}); return; }
+    if(navigator.share){ await navigator.share({text}); return; }
+    await navigator.clipboard.writeText(text); toast('Copied. Paste it into WhatsApp.');
+  }catch(e){
+    if(!(e&&e.name==='AbortError')){ try{ await navigator.clipboard.writeText(text); toast('Copied. Paste it into WhatsApp.'); }catch(e2){ toast(text); } }
+  }finally{ if(btn){ btn.disabled=false; btn.textContent='Share your score'; } }
+}
+
 
 /* ---------- generated deck artwork (canvas) ---------- */
 const PLANE_PATH="M21 12c0-.8-.7-1.5-1.5-1.5H14L9.5 3H7.5l2.5 7.5H5L3 8H1.5l1 4-1 4H3l2-2.5h5L7.5 21h2l4.5-7.5h5.5c.8 0 1.5-.7 1.5-1.5z";
@@ -428,6 +561,28 @@ const ART={
     while(x<w){const bw=w*(.03+r()*.06),bh=h*(.05+r()*.13); c.lineTo(x,h-bh); c.lineTo(x+bw,h-bh); x+=bw;}
     c.lineTo(w,h); c.closePath(); c.fill();
     const dx=w*(.4+r()*.2), dr=h*.07; c.beginPath(); c.arc(dx,h-h*.17,dr,Math.PI,0); c.fill(); c.fillRect(dx-dr*1.3,h-h*.17,dr*2.6,h*.17); c.fillRect(dx-1.5,h-h*.17-dr-h*.06,3,h*.06);
+  },
+  /* Speed and Machines: desert sunset over a salt flat, with speed streaks */
+  speed(c,w,h,r){
+    const hz=h*(.6+r()*.06);
+    const g=c.createLinearGradient(0,0,0,hz); g.addColorStop(0,'#2a1846'); g.addColorStop(.5,'#b8475a'); g.addColorStop(1,'#f4a259'); c.fillStyle=g; c.fillRect(0,0,w,hz);
+    const sx=w*(.25+r()*.5), sr=Math.min(w,h)*(.16+r()*.06);
+    const sg=c.createRadialGradient(sx,hz,0,sx,hz,sr*2.6); sg.addColorStop(0,'rgba(255,230,160,.65)'); sg.addColorStop(1,'rgba(255,200,120,0)'); c.fillStyle=sg; c.fillRect(0,0,w,hz);
+    c.save(); c.beginPath(); c.rect(0,0,w,hz); c.clip();
+    c.fillStyle='#ffd27a'; c.beginPath(); c.arc(sx,hz,sr,Math.PI,0); c.fill();
+    c.fillStyle='#f4a259'; for(let i=0;i<4;i++){const y=hz-sr*(.12+i*.16), t=sr*(.05+i*.012); c.fillRect(sx-sr,y,sr*2,t);}
+    const ranges=[['#7a3a5c',.16],['#4e2648',.1],['#2e1a38',.06]];
+    ranges.forEach(([col,hh],k)=>{c.fillStyle=col;c.beginPath();c.moveTo(0,hz);let x=0;
+      while(x<=w){const y=hz-h*hh*(.4+r()*.9);c.lineTo(x,y);x+=w*(.05+r()*.09);}c.lineTo(w,hz);c.closePath();c.fill();});
+    c.restore();
+    const fg=c.createLinearGradient(0,hz,0,h); fg.addColorStop(0,'#e9c79a'); fg.addColorStop(1,'#a8795a'); c.fillStyle=fg; c.fillRect(0,hz,w,h-hz);
+    c.strokeStyle='rgba(255,245,225,.35)'; c.lineWidth=1;
+    for(let i=0;i<7;i++){const y=hz+(h-hz)*Math.pow((i+1)/8,1.6); c.beginPath(); c.moveTo(0,y); c.lineTo(w,y); c.stroke();}
+    c.strokeStyle='rgba(120,70,50,.45)'; for(let i=-6;i<=6;i++){c.beginPath();c.moveTo(sx+i*w*.02,hz);c.lineTo(sx+i*w*.35,h);c.stroke();}
+    c.lineCap='round';
+    for(let i=0;i<9;i++){const y=h*(.08+r()*.78), x0=r()*w*.6, len=w*(.15+r()*.4);
+      const lg=c.createLinearGradient(x0,0,x0+len,0); lg.addColorStop(0,'rgba(255,245,225,0)'); lg.addColorStop(1,`rgba(255,245,225,${.25+r()*.35})`);
+      c.strokeStyle=lg; c.lineWidth=1+r()*2.2; c.beginPath(); c.moveTo(x0,y); c.lineTo(x0+len,y); c.stroke();}
   }
 };
 function paintArt(root){
@@ -499,6 +654,7 @@ function renderHome(){
       ${BRAND_HTML}
       <p>One card from history, five minutes a day.</p>
     </header>
+    <div id="otd">${otdHTML()}</div>
     ${rankBlock()}
     ${flashEntry()}
     <div class="stats" aria-label="Your progress">
@@ -506,6 +662,7 @@ function renderHome(){
       <span class="chip shield ${shieldReady()?'':'used'}" title="Miss one day a week without losing your streak">Streak shield ${shieldReady()?'ready':'used this week'}</span>
       <span class="chip"><b>${P.xp}</b> XP</span>
       <span class="chip"><b>${doneCount}</b> of ${ORDER.length} cards</span>
+      <button class="chip snd" data-act="sound" aria-pressed="${SOUND}">${SOUND?'Sound on':'Sound off'}</button>
     </div>
     <section aria-labelledby="today">
       <p class="sc" id="today" style="margin:0 0 8px">${P.done[next]?'Draw again':'Today’s draw'}</p>
@@ -530,6 +687,10 @@ function renderHome(){
       <span><span class="sc">Your collection</span><br>${doneCount} of ${ORDER.length} cards collected</span>
       <span class="fan">${hand.map((i,k)=>`<span class="fan-c" style="--k:${k}">${i?mini(i,false):'<span class="mini back"></span>'}</span>`).join('')}</span>
     </button>
+    <button class="link tl-link" data-go="timeline">
+      <span><span class="sc">Your timeline</span><br>See where your cards sit in history</span>
+      <span class="tl-spark" aria-hidden="true">${[...ORDER].sort((a,b)=>yearNum(a)-yearNum(b)).map(i=>`<i class="${P.done[i]?'on':''}"></i>`).join('')}</span>
+    </button>
     <section class="path" aria-labelledby="rq-h">
       <div class="path-head"><h3 id="rq-h">Request a card</h3><span class="sc">Who or what next?</span></div>
       <form class="form" id="reqform">
@@ -539,7 +700,7 @@ function renderHome(){
       </form>
       <div class="rqs" id="rqs">${reqsHTML()}</div>
     </section>
-    <p class="foot">${PROFILE&&!PROFILE.solo?`Playing as ${esc(PROFILE.name)} \u00b7 family code ${esc(PROFILE.code)}. `:'Playing solo. '}Progress is saved on this device${PROFILE&&!PROFILE.solo?' and to the family scoreboard':''}. <button class="textbtn" data-act="rejoin">Change</button> \u00b7 <button class="textbtn" data-act="howto">How to play</button></p>
+    <p class="foot">${PROFILE&&!PROFILE.solo?`Playing as ${esc(PROFILE.name)} \u00b7 family code ${esc(PROFILE.code)}. `:'Playing solo. '}Progress is saved on this device${PROFILE&&!PROFILE.solo?' and to the family scoreboard':''}. <button class="textbtn" data-act="rejoin">${PROFILE&&!PROFILE.solo?'Change name or emblem':'Change'}</button> \u00b7 <button class="textbtn" data-act="howto">How to play</button></p>
   </div>`;
   fillNames();
 }
@@ -592,7 +753,7 @@ function renderDone(){
     ${requestedBy(S.id)?`<p class="reqby">Requested by ${esc(requestedBy(S.id))}</p>`:''}
     <p class="score">${S.score} of ${st.quiz.length} correct · +${S.gained} XP · ${currentStreak()}-day streak</p>
     <div class="take"><span class="sc">The takeaway</span><p>${esc(st.take)}</p></div>
-    <button class="cta" data-go="home">Back to the decks</button>
+    <div class="finish-btns"><button class="cta ghost" data-act="share">Share your score</button><button class="cta" data-go="home">Back to the decks</button></div>
   </div>`;
 }
 
@@ -617,6 +778,7 @@ function render(){
   else if(S.view==='ranks') renderRanks();
   else if(S.view==='flash') renderFlash();
   else if(S.view==='flashdone') renderFlashDone();
+  else if(S.view==='timeline') renderTimeline();
   window.scrollTo(0,0);
   paintArt(app);
   maybeTour();
@@ -647,7 +809,8 @@ function finish(){
   const after=rankFor(cardsDone(P.done));
   S.rankUp = after>before ? after : null;
   S.deckDone = (!deckWasDone && d.ids.every(i=>P.done[i])) ? d.name : null;
-  save(); S.gained=gained; S.view='done'; render(); pushProgress();
+  save(); S.gained=gained; S.view='done'; render(); pushProgress(); prepShare();
+  if(S.rankUp!=null) SFX.rankup(); else SFX.collect();
 }
 
 app.addEventListener('click',e=>{
@@ -655,9 +818,12 @@ app.addEventListener('click',e=>{
   if(b.dataset.open){ open(b.dataset.open); return; }
   if(b.dataset.go){ stopSpeech(); S.view=b.dataset.go; render(); return; }
   if(b.dataset.pick!==undefined && S.picked===null){
-    S.picked=+b.dataset.pick; if(S.picked===curQ().a) S.score++; render(); return;
+    S.picked=+b.dataset.pick; if(S.picked===curQ().a){ S.score++; SFX.right(); } else SFX.wrong(); render(); return;
   }
+  if(b.dataset.emb){ PICKED_EMBLEM=b.dataset.emb; app.querySelectorAll('.emb').forEach(x=>{const on=x===b; x.classList.toggle('on',on); x.setAttribute('aria-pressed',on);}); return; }
   const a=b.dataset.act; const st=S.id&&STORIES[S.id];
+  if(a==='sound'){ toggleSound(); b.textContent=SOUND?'Sound on':'Sound off'; b.setAttribute('aria-pressed',SOUND); return; }
+  if(a==='share'){ shareScore(); return; }
   if(a==='howto'){ replayTour(); return; }
   if(a==='flash'){ startFlash(); return; }
   if(a==='fnext'){ if(S.fi<S.fq.length-1){ S.fi++; S.picked=null; render(); } else finishFlash(); return; }
@@ -665,10 +831,10 @@ app.addEventListener('click',e=>{
   if(a==='solo'){ PROFILE={solo:true}; saveProfile(PROFILE); location.reload(); return; }
   if(a==='rejoin'){ stopSpeech(); S.view='join'; render(); return; }
   if(a==='close'){ stopSpeech(); S.view='home'; render(); }
-  else if(a==='prev'&&S.step>0){ S.step--; render(); if(S.listening) readCurrent(); }
+  else if(a==='prev'&&S.step>0){ S.step--; SFX.flip(); render(); if(S.listening) readCurrent(); }
   else if(a==='next'){
-    if(S.step<st.cards.length-1){ S.step++; render(); if(S.listening) readCurrent(); }
-    else { stopSpeech(); S.listening=false; S.view='quiz'; S.qi=0; S.picked=null; render(); }
+    if(S.step<st.cards.length-1){ S.step++; SFX.flip(); render(); if(S.listening) readCurrent(); }
+    else { SFX.flip(); stopSpeech(); S.listening=false; S.view='quiz'; S.qi=0; S.picked=null; render(); }
   }
   else if(a==='listen'){
     S.listening=!S.listening;
@@ -688,7 +854,7 @@ app.addEventListener('submit',e=>{
     const msg=document.getElementById('jmsg');
     if(!name){ msg.textContent='Type your first name.'; return; }
     if(code.length<4){ msg.textContent='Type the family code you were sent. It is at least 4 letters or numbers.'; return; }
-    PROFILE={name,code}; saveProfile(PROFILE); location.reload(); return;
+    PROFILE={name,code,emblem:PICKED_EMBLEM||null}; saveProfile(PROFILE); location.reload(); return;
   }
   if(f.id==='reqform'){
     const ta=document.getElementById('reqtext'); const msg=document.getElementById('reqmsg');
@@ -719,4 +885,5 @@ app.addEventListener('touchend',e=>{
 if(!PROFILE) S.view='join';
 render();
 initShared();
+loadOnThisDay();
 if('serviceWorker' in navigator){ window.addEventListener('load',()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); }); }
