@@ -32,6 +32,8 @@ function requestedBy(cardId){
   if(typeof FULFILLED==='undefined') return '';
   for(const [rid,v] of Object.entries(FULFILLED)){
     if(fulfilledCard(v)!==cardId) continue;
+    const fam=(v&&v.code)||'clevs123';
+    if(!PROFILE||PROFILE.solo||PROFILE.code!==fam) continue;
     if(v&&v.by) return v.by;
     const r=(typeof SH!=='undefined'&&SH.reqs||[]).find(x=>x.id===rid);
     if(r) return nameFor(r.uid);
@@ -265,12 +267,13 @@ function boardHTML(){
   if(SH.state==='loading') return '<p class="note">Connecting to the scoreboard…</p>';
   if(SH.state==='error') return '<p class="note">The scoreboard can’t be reached right now. Your progress is still saved on this device and will sync next time.</p>';
   const ids=Object.keys(SH.board).filter(id=>SH.board[id]&&SH.board[id].name);
-  if(!ids.length) return '<p class="note">Nobody has collected a card yet. Be the first.</p>';
+  const invite=`<div class="invite${ids.length<=1?' big':''}">${ids.length<=1?'<p><b>Just you so far.</b> Send your family the code so they can join your scoreboard.</p>':''}<span>Family code <b>${esc(PROFILE.code)}</b></span><button class="small" data-act="invite">Invite family</button></div>`;
+  if(!ids.length) return '<p class="note">Nobody has collected a card yet. Be the first.</p>'+invite;
   ids.sort((a,b)=>(weekXP(SH.board[b])-weekXP(SH.board[a]))||((SH.board[b].xp||0)-(SH.board[a].xp||0)));
   const nudge=SH.me&&!PROFILE.emblem?'<p class="note nudge"><button class="textbtn" data-act="rejoin">Pick your emblem</button> to show next to your name.</p>':'';
   const head=nudge+`<div class="bhead"><span>Ranked by this week \u00b7 resets every Monday</span><span>Week / All time</span></div>`;
   return head+ids.map((id,i)=>{const d=SH.board[id]; const n=Object.keys(d.done||{}).filter(k=>STORIES[k]).length;
-    return `<div class="prow"><span class="rank">${i+1}</span>${initialAv(id)}<span><span class="pn">${esc(nameFor(id))}${id===SH.me?' (you)':''}</span><br><span class="ps">${esc(RANKS[rankFor(n)].name)} · ${n} card${n===1?'':'s'} · ${streakOf(d)}-day streak</span></span><span class="px2"><b>${weekXP(d)} XP</b><span>${d.xp||0} total</span></span></div>`}).join('');
+    return `<div class="prow"><span class="rank">${i+1}</span>${initialAv(id)}<span><span class="pn">${esc(nameFor(id))}${id===SH.me?' (you)':''}</span><br><span class="ps">${esc(RANKS[rankFor(n)].name)} · ${n} card${n===1?'':'s'} · ${streakOf(d)}-day streak</span></span><span class="px2"><b>${weekXP(d)} XP</b><span>${d.xp||0} total</span></span></div>`}).join('')+invite;
 }
 function reqsHTML(){
   if(PROFILE&&PROFILE.solo) return '';
@@ -294,17 +297,120 @@ function pushProgress(){
   const body={name:PROFILE.name, emblem:PROFILE.emblem||null, done:Object.assign({},P.done), xp:P.xp||0, streak:P.streak||0, last:P.last||null, week:P.week||null, freeze:P.freezeWeek||null, updated:new Date().toISOString()};
   return queueWrite(()=>fs.setDoc(fs.doc(SH.db,'families',PROFILE.code,'players',SH.me),body));
 }
+/* Who runs the app, shown on the privacy page. Fill these in before going public. */
+const PRIVACY_OWNER='';
+const PRIVACY_CONTACT='';
+let FB=null;
+function fbReady(){
+  if(!FB){
+    FB=(async()=>{
+      const base=`https://www.gstatic.com/firebasejs/${FB_VERSION}/`;
+      const [appMod,authMod,fs]=await Promise.all([import(base+'firebase-app.js'),import(base+'firebase-auth.js'),import(base+'firebase-firestore.js')]);
+      const fbApp=appMod.initializeApp(FIREBASE_CONFIG);
+      const auth=authMod.getAuth(fbApp);
+      await auth.authStateReady();
+      const user=auth.currentUser || (await authMod.signInAnonymously(auth)).user;
+      return {fs, db:fs.getFirestore(fbApp), user, auth};
+    })();
+    FB.catch(()=>{ FB=null; });
+  }
+  return FB;
+}
+const CODE_WORDS=['oak','raven','comet','anchor','castle','lantern','falcon','harbour','meadow','quill','rocket','sabre','thistle','beacon','compass','ember','glacier','harp','ivy','kestrel','lark','maple','orbit','pebble','quartz','ribbon','saffron','tiger','violet','willow','badger','cedar','otter','puffin','acorn','bramble','copper','dragon','heron','summit'];
+function randomCode(){
+  const a=new Uint32Array(4); crypto.getRandomValues(a);
+  const w1=CODE_WORDS[a[0]%CODE_WORDS.length]; let w2=CODE_WORDS[a[1]%CODE_WORDS.length]; if(w2===w1) w2=CODE_WORDS[(a[1]+1)%CODE_WORDS.length];
+  return `${w1}-${w2}-${1000+a[2]%9000}`;
+}
+async function familyExists(code){
+  const {fs,db}=await fbReady();
+  const q=await fs.getDocs(fs.query(fs.collection(db,'families',code,'players'),fs.limit(1)));
+  return !q.empty;
+}
+function joinDetails(){
+  const name=(document.getElementById('jname').value||'').trim().slice(0,30);
+  const msg=document.getElementById('jmsg');
+  if(!name){ msg.textContent='Type your first name first.'; document.getElementById('jname').focus(); return null; }
+  return {name, msg};
+}
+async function joinFamily(){
+  const d=joinDetails(); if(!d) return;
+  const code=cleanCode(document.getElementById('jcode').value), btn=document.getElementById('jgo');
+  if(code.length<4){ d.msg.textContent='Type the family code you were sent. It is at least 4 letters or numbers.'; return; }
+  btn.disabled=true; d.msg.textContent='Checking the code\u2026';
+  try{
+    const mine=PROFILE&&!PROFILE.solo&&PROFILE.code===code;
+    if(!mine && !(await familyExists(code))){ d.msg.textContent='No family is using that code yet. Check it with the person who sent it, or start a new family.'; btn.disabled=false; return; }
+  }catch(e){ d.msg.textContent='Can\u2019t check the code right now. Check your connection and try again.'; btn.disabled=false; return; }
+  PROFILE={name:d.name, code, emblem:PICKED_EMBLEM||null}; saveProfile(PROFILE); location.reload();
+}
+async function newFamily(){
+  const d=joinDetails(); if(!d) return;
+  const btn=document.querySelector('[data-act="newfam"]'); btn.disabled=true; d.msg.textContent='Setting up your family\u2026';
+  try{
+    let code=randomCode();
+    for(let i=0;i<5&&(await familyExists(code));i++) code=randomCode();
+    PROFILE={name:d.name, code, emblem:PICKED_EMBLEM||null, founder:true}; saveProfile(PROFILE); location.reload();
+  }catch(e){ d.msg.textContent='Can\u2019t reach the scoreboard right now. Check your connection and try again.'; btn.disabled=false; }
+}
+function inviteText(){ return `Join our family on If Only I Knew, a five-minute history card game. Open ${location.origin+location.pathname}, then type our family code: ${PROFILE.code}`; }
+async function shareInvite(){
+  const text=inviteText();
+  try{ if(navigator.share){ await navigator.share({text}); return; } await navigator.clipboard.writeText(text); toast('Invite copied. Paste it into WhatsApp.'); }
+  catch(e){ if(!(e&&e.name==='AbortError')){ try{ await navigator.clipboard.writeText(text); toast('Invite copied. Paste it into WhatsApp.'); }catch(e2){ toast('Your family code is '+PROFILE.code); } } }
+}
+async function deleteMyData(){
+  const msg=document.getElementById('delmsg'), btn=document.querySelector('[data-act="delyes"]');
+  if(btn) btn.disabled=true; if(msg) msg.textContent='Deleting\u2026';
+  try{
+    if(PROFILE&&!PROFILE.solo){
+      await SH.writing.catch(()=>{});
+      SH.state='off';
+      const {fs,db,user,auth}=await fbReady();
+      const mine=await fs.getDocs(fs.query(fs.collection(db,'families',PROFILE.code,'requests'),fs.where('uid','==',user.uid)));
+      for(const d of mine.docs){ await fs.deleteDoc(fs.doc(db,'inbox',d.id)).catch(()=>{}); await fs.deleteDoc(d.ref); }
+      await fs.deleteDoc(fs.doc(db,'families',PROFILE.code,'players',user.uid));
+      try{ await user.delete(); }catch(e){ try{ await auth.signOut(); }catch(e2){} }
+    }
+    try{ Object.keys(localStorage).filter(k=>k===KEY||k.startsWith('ioik-')).forEach(k=>localStorage.removeItem(k)); }catch(e){}
+    location.replace(location.pathname);
+  }catch(e){
+    console.warn('Delete failed',e);
+    if(msg) msg.textContent='Something went wrong and not everything was deleted. Check your connection and try again.';
+    if(btn) btn.disabled=false; SH.state='on';
+  }
+}
+function renderPrivacy(){
+  const fam=PROFILE&&!PROFILE.solo;
+  app.innerHTML=`<div class="wrap privacy">
+    <button class="iconbtn back" data-go="${PROFILE?'home':'join'}">\u2190 Back</button>
+    <header class="mast"><h1 style="font-size:40px">Your <span>privacy</span></h1><p>Plain English, no small print.</p></header>
+    <section><h3>What we keep</h3>
+      <p>If you join a family scoreboard: your first name, the emblem you pick, your family code, the cards you have collected, your XP and streak, and any card requests you send. You are signed in with a random ID, not an email address or phone number.</p>
+      <p>If you play on your own, nothing leaves your device.</p></section>
+    <section><h3>Who can see it</h3>
+      <p>Your name, emblem and scores are only shown to people who have your family code. Card requests are seen by your family and by the person who writes the cards, who uses them to decide what to make next.</p></section>
+    <section><h3>Where it is kept</h3>
+      <p>On your device, and in Google Firebase in London. The app also loads fonts from Google and the \u201cOn this day\u201d story from Wikipedia, so those services see your device\u2019s internet address, as any website does.</p></section>
+    <section><h3>How long we keep it</h3>
+      <p>Until you delete it. Delete it whenever you like using the button below.</p></section>
+    <section><h3>Children</h3>
+      <p>If you are under 13, ask a parent or carer before joining a family scoreboard.</p></section>
+    <section><h3>Who runs this</h3>
+      <p>${PRIVACY_OWNER?esc(PRIVACY_OWNER):'<i>Name to be added</i>'}${PRIVACY_CONTACT?` \u00b7 <a href="mailto:${esc(PRIVACY_CONTACT)}">${esc(PRIVACY_CONTACT)}</a>`:' \u00b7 <i>contact email to be added</i>'}. You can ask what we hold about you, ask us to correct it, or complain to the Information Commissioner\u2019s Office (ico.org.uk).</p></section>
+    <section class="path delbox"><h3>Delete my data</h3>
+      ${S.confirmDel?`<p>This removes ${fam?'your scores, your emblem and your card requests from the family scoreboard, and ':''}everything this app has saved on this device. You can\u2019t undo it.</p>
+        <div class="rowb"><button class="textbtn" data-act="delno">Cancel</button><button class="small danger" data-act="delyes">Yes, delete everything</button></div>`
+      :`<p>${fam?'Removes you from the family scoreboard and':'Removes'} all your progress on this device.</p><button class="cta ghost" data-act="delask" style="align-self:flex-start">Delete my data</button>`}
+      <p class="note" id="delmsg" role="status"></p>
+    </section>
+  </div>`;
+}
 async function initShared(){
   if(!PROFILE||PROFILE.solo){ SH.state='off'; refreshShared(); return; }
   const timer=setTimeout(()=>{ if(SH.state==='loading'){ SH.state='error'; refreshShared(); } },15000);
   try{
-    const base=`https://www.gstatic.com/firebasejs/${FB_VERSION}/`;
-    const [appMod,authMod,fs]=await Promise.all([import(base+'firebase-app.js'),import(base+'firebase-auth.js'),import(base+'firebase-firestore.js')]);
-    const fbApp=appMod.initializeApp(FIREBASE_CONFIG);
-    const auth=authMod.getAuth(fbApp);
-    await auth.authStateReady();
-    const user=auth.currentUser || (await authMod.signInAnonymously(auth)).user;
-    const db=fs.getFirestore(fbApp);
+    const {fs,db,user}=await fbReady();
     SH.fs=fs; SH.db=db; SH.me=user.uid;
     const myRef=fs.doc(db,'families',PROFILE.code,'players',user.uid);
     const snap=await fs.getDoc(myRef);
@@ -331,26 +437,27 @@ async function initShared(){
 }
 
 function renderJoin(){
-  const p=PROFILE&&!PROFILE.solo?PROFILE:{};
+  const p=PROFILE&&!PROFILE.solo?PROFILE:{}, editing=!!p.code;
   app.innerHTML=`<div class="wrap">
     <header class="mast">${BRAND_HTML}
       <p>One card from history, five minutes a day.</p>
     </header>
     <section class="path">
-      <div class="path-head"><h3>Join your family</h3></div>
-      <p class="note" style="padding:0">Enter your first name and the family code you were sent. Your scores then appear on the family scoreboard.</p>
+      <div class="path-head"><h3>${editing?'Your details':'Play with your family'}</h3></div>
       <form class="form" id="joinform">
         <label class="sc" for="jname">Your first name</label>
         <input id="jname" class="field" maxlength="30" autocomplete="given-name" value="${esc(p.name||'')}">
-        <label class="sc" for="jcode">Family code</label>
-        <input id="jcode" class="field" maxlength="40" autocapitalize="none" autocomplete="off" spellcheck="false" value="${esc(p.code||'')}">
         ${emblemPicker(p.emblem)}
-        <p class="note" id="jmsg" style="padding:0"></p>
-        <button class="cta" type="submit" style="align-self:flex-start">Start playing</button>
+        <label class="sc" for="jcode">Family code</label>
+        <span class="note" style="padding:0">${editing?'Change this only if you are moving to a different family.':'Got a code from someone in your family? Type it here.'}</span>
+        <input id="jcode" class="field" maxlength="40" autocapitalize="none" autocomplete="off" spellcheck="false" placeholder="for example oak-raven-1234" value="${esc(p.code||'')}">
+        <p class="note" id="jmsg" role="status" style="padding:0"></p>
+        <button class="cta" type="submit" id="jgo" style="align-self:flex-start">${editing?'Save':'Join my family'}</button>
       </form>
+      ${editing?'':`<div class="newfam"><span class="sc">No code yet?</span><p class="note" style="padding:0">Start a new family scoreboard and we\u2019ll give you a code to send to everyone.</p><button class="cta ghost" type="button" data-act="newfam">Start a new family</button></div>`}
     </section>
     <button class="textbtn" data-act="solo">Just play on my own</button>
-    <p class="foot">Only your first name and your scores are shared, and only with people who have your family code.</p>
+    <p class="foot">Only your first name, emblem and scores are shared, and only with people who have your family code. <button class="textbtn" data-go="privacy">Privacy</button></p>
   </div>`;
 }
 
@@ -709,13 +816,13 @@ function renderHome(){
     <section class="path" aria-labelledby="rq-h">
       <div class="path-head"><h3 id="rq-h">Request a card</h3><span class="sc">Who or what next?</span></div>
       <form class="form" id="reqform">
-        <label for="reqtext" class="note" style="padding:0">Name a person, event or invention you would like a card about.</label>
+        <label for="reqtext" class="note" style="padding:0">Name a person, event or invention you would like a card about. Your family and the card writer will see it.</label>
         <textarea id="reqtext" class="field" maxlength="280" placeholder="For example: the first Tour de France, or how the jet engine was invented"></textarea>
         <div class="rowb"><span class="note" id="reqmsg" style="padding:0"></span><button class="small" type="submit" id="reqsend">Send request</button></div>
       </form>
       <div class="rqs" id="rqs">${reqsHTML()}</div>
     </section>
-    <p class="foot">${PROFILE&&!PROFILE.solo?`Playing as ${esc(PROFILE.name)} \u00b7 family code ${esc(PROFILE.code)}. `:'Playing solo. '}Progress is saved on this device${PROFILE&&!PROFILE.solo?' and to the family scoreboard':''}. <button class="textbtn" data-act="rejoin">${PROFILE&&!PROFILE.solo?'Change name or emblem':'Change'}</button> \u00b7 <button class="textbtn" data-act="howto">How to play</button></p>
+    <p class="foot">${PROFILE&&!PROFILE.solo?`Playing as ${esc(PROFILE.name)} \u00b7 family code ${esc(PROFILE.code)}. `:'Playing solo. '}Progress is saved on this device${PROFILE&&!PROFILE.solo?' and to the family scoreboard':''}. <button class="textbtn" data-act="rejoin">${PROFILE&&!PROFILE.solo?'Change name or emblem':'Change'}</button> \u00b7 <button class="textbtn" data-act="howto">How to play</button> \u00b7 <button class="textbtn" data-go="privacy">Privacy</button></p>
   </div>`;
   fillNames();
 }
@@ -794,6 +901,7 @@ function render(){
   else if(S.view==='flash') renderFlash();
   else if(S.view==='flashdone') renderFlashDone();
   else if(S.view==='timeline') renderTimeline();
+  else if(S.view==='privacy') renderPrivacy();
   window.scrollTo(0,0);
   paintArt(app);
   maybeTour();
@@ -831,7 +939,7 @@ function finish(){
 app.addEventListener('click',e=>{
   const b=e.target.closest('button'); if(!b) return;
   if(b.dataset.open){ open(b.dataset.open); return; }
-  if(b.dataset.go){ stopSpeech(); S.view=b.dataset.go; render(); return; }
+  if(b.dataset.go){ stopSpeech(); S.confirmDel=false; S.view=b.dataset.go; render(); return; }
   if(b.dataset.pick!==undefined && S.picked===null){
     S.picked=+b.dataset.pick; if(S.picked===curQ().a){ S.score++; SFX.right(); } else SFX.wrong(); render(); return;
   }
@@ -839,6 +947,10 @@ app.addEventListener('click',e=>{
   const a=b.dataset.act; const st=S.id&&STORIES[S.id];
   if(a==='sound'){ toggleSound(); b.textContent=SOUND?'Sound on':'Sound off'; b.setAttribute('aria-pressed',SOUND); return; }
   if(a==='share'){ shareScore(); return; }
+  if(a==='newfam'){ newFamily(); return; }
+  if(a==='invite'){ shareInvite(); return; }
+  if(a==='delask'||a==='delno'){ S.confirmDel=a==='delask'; renderPrivacy(); return; }
+  if(a==='delyes'){ deleteMyData(); return; }
   if(a==='howto'){ replayTour(); return; }
   if(a==='flash'){ startFlash(); return; }
   if(a==='fnext'){ if(S.fi<S.fq.length-1){ S.fi++; S.picked=null; render(); } else finishFlash(); return; }
@@ -863,14 +975,7 @@ app.addEventListener('click',e=>{
 app.addEventListener('submit',e=>{
   e.preventDefault();
   const f=e.target;
-  if(f.id==='joinform'){
-    const name=(document.getElementById('jname').value||'').trim().slice(0,30);
-    const code=cleanCode(document.getElementById('jcode').value);
-    const msg=document.getElementById('jmsg');
-    if(!name){ msg.textContent='Type your first name.'; return; }
-    if(code.length<4){ msg.textContent='Type the family code you were sent. It is at least 4 letters or numbers.'; return; }
-    PROFILE={name,code,emblem:PICKED_EMBLEM||null}; saveProfile(PROFILE); location.reload(); return;
-  }
+  if(f.id==='joinform'){ joinFamily(); return; }
   if(f.id==='reqform'){
     const ta=document.getElementById('reqtext'); const msg=document.getElementById('reqmsg');
     const text=(ta.value||'').trim().slice(0,280);
@@ -879,7 +984,10 @@ app.addEventListener('submit',e=>{
     if(SH.state!=='on'){ msg.textContent='The scoreboard isn’t connected yet. Try again in a moment.'; return; }
     const btn=document.getElementById('reqsend'); btn.disabled=true; msg.textContent='Sending…';
     const fs=SH.fs;
-    fs.addDoc(fs.collection(SH.db,'families',PROFILE.code,'requests'),{uid:SH.me,text,at:new Date().toISOString()})
+    const at=new Date().toISOString(), ref=fs.doc(fs.collection(SH.db,'families',PROFILE.code,'requests')), wb=fs.writeBatch(SH.db);
+    wb.set(ref,{uid:SH.me,text,at});
+    wb.set(fs.doc(SH.db,'inbox',ref.id),{uid:SH.me,code:PROFILE.code,name:PROFILE.name,text,at});
+    wb.commit()
       .then(()=>{ ta.value=''; msg.textContent='Sent. Thanks!'; })
       .catch(()=>{ msg.textContent='Couldn’t send that. Check your connection and try again.'; })
       .finally(()=>{ btn.disabled=false; });
