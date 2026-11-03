@@ -89,12 +89,15 @@ function renderRanks(){
 const TOURS={
   home:[
     {title:'Welcome to If Only I Knew', text:'Each card is a five-minute story from history, with a quick quiz at the end. Here’s a 30-second tour.'},
+    {sel:'#otd .otd', title:'On this day', text:'Something that happened on today’s date in history, new every morning. Tap it to read more.'},
     {sel:'.feature', title:'Today’s draw', text:'Tap here to play today’s card. Brand-new cards always turn up here first.'},
     {sel:'.rank-card', title:'Your rank', text:'Every card you collect moves you up the ranks, from Wanderer all the way to Keeper of Time. Tap it to see the full ladder.'},
     {sel:'.stats', title:'Streaks and XP', text:'Play a card each day to build a streak. Your streak shield saves one missed day a week, and a new shield arrives every Monday.'},
+    {sel:'.chip.snd', title:'Sound', text:'Chimes for right and wrong answers, plus a little fanfare when you collect a card. On Android your phone buzzes too. Tap here to turn sound off.'},
     {sel:'.flash-card', title:'Flashback quiz', text:'Once you’ve collected two cards, this mixes up questions from cards you’ve already played. The first round each day earns bonus XP.'},
-    {sel:'#board', title:'Family scoreboard', text:'See how you’re doing against the family. It’s ranked by this week’s XP and starts again every Monday, so anyone can win a week.'},
+    {sel:'#board', title:'Family scoreboard', text:'See how you’re doing against the family. It’s ranked by this week’s XP and starts again every Monday, so anyone can win a week. The picture next to each name is that player’s emblem.'},
     {sel:'.decks', title:'The decks', text:'Cards are grouped into decks. Tap a deck to open it and pick any card. Collect a whole deck to earn its gold seal.'},
+    {sel:'.tl-link', title:'Your timeline', text:'See every card in date order, from Boudica to the present day. The gaps show which cards you still need to collect.'},
     {sel:'#reqform', title:'Request a card', text:'Want a story about someone or something in particular? Ask here. When your idea becomes a card, it’ll say it was requested by you.'}
   ],
   card:[
@@ -103,6 +106,16 @@ const TOURS={
     {sel:'.fig', title:'What’s pictured', text:'Every part shows the person, place or thing it’s about.'},
     {sel:'.nav .primary', title:'Turn the page', text:'Tap Next, or swipe left on the story. Swipe right to go back a page.'},
     {sel:'[data-act="close"]', title:'Close the card', text:'Tap the cross to go back to the decks at any time. You can start the card again whenever you like.'}
+  ],
+  done:[
+    {sel:'[data-act="share"]', title:'Share your score', text:'Send your score to the family WhatsApp group as a picture and challenge them to beat it.'}
+  ],
+  whatsnew1:[
+    {title:'New in If Only I Knew', text:'A new Speed and Machines deck, plus a few new things to find. Here’s a quick look.'},
+    {sel:'#otd .otd', title:'On this day', text:'Something that happened on today’s date in history, new every morning. Tap it to read more.'},
+    {sel:'.chip.snd', title:'Sound', text:'Chimes for right and wrong answers, plus a little fanfare when you collect a card. On Android your phone buzzes too. Tap here to turn sound off.'},
+    {fam:true, sel:'#board', title:'Your emblem', text:'Your emblem sits next to your name on the scoreboard. Tap Change name or emblem at the bottom of the page to pick a new one.'},
+    {sel:'.tl-link', title:'Your timeline', text:'See every card in date order, from Boudica to the present day. The gaps show which cards you still need to collect.'}
   ],
   quiz:[
     {sel:'.q', title:'Play the card', text:'Answer three quick questions. Every answer is in the story you’ve just read. You get 10 XP for each right answer, plus 20 XP the first time you collect a card.'}
@@ -113,12 +126,14 @@ function markTour(n){ try{localStorage.setItem('ioik-tour-'+n,'1')}catch(e){} }
 let TOUR=null;
 function maybeTour(){
   if(TOUR) return;
-  const n = S.view==='home'?'home' : S.view==='story'?'card' : S.view==='quiz'?'quiz' : null;
+  let n = S.view==='home'?'home' : S.view==='story'?'card' : S.view==='quiz'?'quiz' : S.view==='done'?'done' : null;
+  if(n==='home'&&tourSeen('home')) n='whatsnew1';
   if(!n || tourSeen(n)) return;
-  setTimeout(()=>{ if(!TOUR && ((n==='home'&&S.view==='home')||(n==='card'&&S.view==='story')||(n==='quiz'&&S.view==='quiz'))) startTour(n); },450);
+  const view={home:'home',whatsnew1:'home',card:'story',quiz:'quiz',done:'done'}[n];
+  setTimeout(()=>{ if(!TOUR && S.view===view) startTour(n); },n==='home'||n==='whatsnew1'?900:450);
 }
 function startTour(n){
-  const steps=TOURS[n].filter(st=>!st.sel||document.querySelector(st.sel));
+  const steps=TOURS[n].filter(st=>(!st.fam||(PROFILE&&!PROFILE.solo))&&(!st.sel||document.querySelector(st.sel)));
   if(!steps.length){ markTour(n); return; }
   if(S.listening){ S.listening=false; stopSpeech(); }
   TOUR={n,steps,i:0};
@@ -154,10 +169,10 @@ function showStep(){
     el.querySelector('[data-tour="next"]').focus();
   });
 }
-function endTour(){ if(!TOUR) return; markTour(TOUR.n); TOUR=null; const el=document.getElementById('tour'); if(el) el.remove(); }
+function endTour(){ if(!TOUR) return; markTour(TOUR.n); if(TOUR.n==='home') markTour('whatsnew1'); TOUR=null; const el=document.getElementById('tour'); if(el) el.remove(); }
 document.addEventListener('keydown',e=>{ if(TOUR&&e.key==='Escape') endTour(); });
 window.addEventListener('resize',()=>{ if(TOUR) showStep(); });
-function replayTour(){ ['home','card','quiz'].forEach(n=>{ try{localStorage.removeItem('ioik-tour-'+n)}catch(e){} }); S.view='home'; render(); }
+function replayTour(){ ['home','card','quiz','done'].forEach(n=>{ try{localStorage.removeItem('ioik-tour-'+n)}catch(e){} }); S.view='home'; render(); }
 
 /* ---------- flashback quiz ---------- */
 const FLASH_LEN=5;
@@ -670,7 +685,7 @@ function renderHome(){
         ${plate(next)}
         <div class="body">
           <h2>${esc(st.title)}</h2>
-          <span class="kicker">Meet ${esc(st.who.name)}, ${esc(st.who.epithet.toLowerCase())}${requestedBy(next)?`. Requested by ${esc(requestedBy(next))}`:''}</span>
+          <span class="kicker">Meet ${esc(st.who.name)}, ${esc(st.who.epithet.charAt(0).toLowerCase()+st.who.epithet.slice(1))}${requestedBy(next)?`. Requested by ${esc(requestedBy(next))}`:''}</span>
           <span class="cta">${P.done[next]?'Read again':'Draw this card'} · 5 min</span>
         </div>
       </button>
