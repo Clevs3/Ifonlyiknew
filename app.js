@@ -5,7 +5,8 @@ const ORDER = PATHS.flatMap(p=>p.ids);
 const KEY='hindsight-v1';
 function load(){try{return JSON.parse(localStorage.getItem(KEY))||{}}catch(e){return {}}}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(P))}catch(e){}}
-const P=Object.assign({done:{},xp:0,streak:0,last:null,week:null,freezeWeek:null,flash:null},load());
+const P=Object.assign({done:{},xp:0,streak:0,last:null,week:null,freezeWeek:null,flash:null,scores:{},days:[],joined:null},load());
+if(!P.joined){ P.joined=localDay(0); save(); }
 const dayStr=d=>d.toISOString().slice(0,10);
 function localDay(offset=0){const d=new Date();d.setDate(d.getDate()+offset);return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10)}
 /* Weeks run Monday to Sunday; a week is named by its Monday's date. */
@@ -16,6 +17,7 @@ function currentStreak(){ return streakAlive(P.last,P.freezeWeek)?P.streak:0; }
 function shieldReady(){ return P.freezeWeek!==weekId(); }
 function playedToday(){
   const today=localDay(0); S.shieldUsed=false;
+  if(!P.days.includes(today)){ P.days.push(today); P.days=P.days.slice(-60); }
   if(P.last===today) return;
   if(P.last===localDay(-1)) P.streak=(P.streak||0)+1;
   else if(P.last===localDay(-2) && P.freezeWeek!==weekId()){ P.streak=(P.streak||0)+1; P.freezeWeek=weekId(); S.shieldUsed=true; }
@@ -294,7 +296,7 @@ function queueWrite(fn){
 function pushProgress(){
   if(SH.state!=='on'||!SH.me||!PROFILE||PROFILE.solo) return Promise.resolve();
   const fs=SH.fs;
-  const body={name:PROFILE.name, emblem:PROFILE.emblem||null, done:Object.assign({},P.done), xp:P.xp||0, streak:P.streak||0, last:P.last||null, week:P.week||null, freeze:P.freezeWeek||null, updated:new Date().toISOString()};
+  const body={name:PROFILE.name, emblem:PROFILE.emblem||null, scores:Object.assign({},P.scores), days:P.days.slice(-60), joined:P.joined, done:Object.assign({},P.done), xp:P.xp||0, streak:P.streak||0, last:P.last||null, week:P.week||null, freeze:P.freezeWeek||null, updated:new Date().toISOString()};
   return queueWrite(()=>fs.setDoc(fs.doc(SH.db,'families',PROFILE.code,'players',SH.me),body));
 }
 /* Who runs the app, shown on the privacy page. Fill these in before going public. */
@@ -359,6 +361,59 @@ async function shareInvite(){
   try{ if(navigator.share){ await navigator.share({text}); return; } await navigator.clipboard.writeText(text); toast('Invite copied. Paste it into WhatsApp.'); }
   catch(e){ if(!(e&&e.name==='AbortError')){ try{ await navigator.clipboard.writeText(text); toast('Invite copied. Paste it into WhatsApp.'); }catch(e2){ toast('Your family code is '+PROFILE.code); } } }
 }
+/* ---------- feedback: card ratings and messages (write-only for players) ---------- */
+function fbCode(){ return PROFILE&&!PROFILE.solo?PROFILE.code:'solo'; }
+function myRating(id){ try{ return (JSON.parse(localStorage.getItem('ioik-rated'))||{})[id]||0; }catch(e){ return 0; } }
+function rateHTML(id){
+  const v=myRating(id);
+  return `<div class="rate" id="rate"><span class="sc">Did you enjoy this card?</span><div class="rate-btns">
+    <button class="rbtn${v===1?' on':''}" data-rate="1" aria-pressed="${v===1}" aria-label="Yes, I enjoyed it">${THUMB}<span>Yes</span></button>
+    <button class="rbtn down${v===-1?' on':''}" data-rate="-1" aria-pressed="${v===-1}" aria-label="Not really">${THUMB}<span>Not really</span></button></div>
+    <button class="textbtn" data-act="fbcard">Tell us more</button></div>`;
+}
+const THUMB='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11v9H4v-9zM7 11l4-7c1.2 0 2 1 2 2.2V9h5.2c1.2 0 2 1 1.8 2.2l-1.3 7c-.2 1-1 1.8-2 1.8H7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>';
+async function sendRating(id,value){
+  try{ const r=JSON.parse(localStorage.getItem('ioik-rated'))||{}; r[id]=value; localStorage.setItem('ioik-rated',JSON.stringify(r)); }catch(e){}
+  const box=document.getElementById('rate');
+  if(box){ box.querySelectorAll('[data-rate]').forEach(b=>{ const on=+b.dataset.rate===value; b.classList.toggle('on',on); b.setAttribute('aria-pressed',on); }); }
+  try{
+    const {fs,db,user}=await fbReady();
+    await fs.setDoc(fs.doc(db,'ratings',user.uid+'_'+id),{uid:user.uid,code:fbCode(),card:id,value,at:new Date().toISOString()});
+    toast(value===1?'Thanks! Glad you enjoyed it.':'Thanks. That helps make better cards.');
+  }catch(e){ console.warn('Rating not sent',e); toast('Couldn\u2019t send that just now.'); }
+}
+function renderFeedback(){
+  const about=S.fbAbout&&STORIES[S.fbAbout]?STORIES[S.fbAbout].title:'';
+  app.innerHTML=`<div class="wrap">
+    <button class="iconbtn back" data-go="home">\u2190 Decks</button>
+    <header class="mast"><h1 style="font-size:40px">Send <span>feedback</span></h1><p>${about?`About \u201c${esc(about)}\u201d. `:''}What did you enjoy, what was confusing, and what would make you play every day? Every message is read.</p></header>
+    <form class="form" id="fbform">
+      <label class="sc" for="fbtext">Your message</label>
+      <textarea id="fbtext" class="field" maxlength="1000" rows="6" placeholder="For example: the quiz was too easy, or I\u2019d love a deck about the Tudors"></textarea>
+      <div class="rowb"><span class="note" id="fbmsg" role="status" style="padding:0"></span><button class="small" type="submit" id="fbsend">Send</button></div>
+    </form>
+    <p class="foot">Your first name and family code are sent with your message so it can be followed up. To ask for a new card, use Request a card on the home screen.</p>
+  </div>`;
+}
+async function sendFeedback(){
+  const ta=document.getElementById('fbtext'), msg=document.getElementById('fbmsg'), btn=document.getElementById('fbsend');
+  const text=(ta.value||'').trim().slice(0,1000);
+  if(!text){ msg.textContent='Type a message first.'; return; }
+  btn.disabled=true; msg.textContent='Sending\u2026';
+  try{
+    const {fs,db,user}=await fbReady();
+    const ref=await fs.addDoc(fs.collection(db,'feedback'),{uid:user.uid,code:fbCode(),name:PROFILE&&PROFILE.name||'',text,view:S.fbAbout||'',at:new Date().toISOString()});
+    try{ const ids=JSON.parse(localStorage.getItem('ioik-fb-ids'))||[]; ids.push(ref.id); localStorage.setItem('ioik-fb-ids',JSON.stringify(ids.slice(-50))); }catch(e){}
+    ta.value=''; msg.textContent='Sent. Thank you!';
+  }catch(e){ msg.textContent='Couldn\u2019t send that. Check your connection and try again.'; }
+  finally{ btn.disabled=false; }
+}
+async function deleteFeedback(fs,db,uid){
+  let ids=[]; try{ ids=JSON.parse(localStorage.getItem('ioik-fb-ids'))||[]; }catch(e){}
+  for(const id of ids) await fs.deleteDoc(fs.doc(db,'feedback',id)).catch(()=>{});
+  let rated={}; try{ rated=JSON.parse(localStorage.getItem('ioik-rated'))||{}; }catch(e){}
+  for(const c of Object.keys(rated)) await fs.deleteDoc(fs.doc(db,'ratings',uid+'_'+c)).catch(()=>{});
+}
 async function deleteMyData(){
   const msg=document.getElementById('delmsg'), btn=document.querySelector('[data-act="delyes"]');
   if(btn) btn.disabled=true; if(msg) msg.textContent='Deleting\u2026';
@@ -369,8 +424,12 @@ async function deleteMyData(){
       const {fs,db,user,auth}=await fbReady();
       const mine=await fs.getDocs(fs.query(fs.collection(db,'families',PROFILE.code,'requests'),fs.where('uid','==',user.uid)));
       for(const d of mine.docs){ await fs.deleteDoc(fs.doc(db,'inbox',d.id)).catch(()=>{}); await fs.deleteDoc(d.ref); }
+      await deleteFeedback(fs,db,user.uid);
       await fs.deleteDoc(fs.doc(db,'families',PROFILE.code,'players',user.uid));
       try{ await user.delete(); }catch(e){ try{ await auth.signOut(); }catch(e2){} }
+    } else {
+      let sent=false; try{ sent=!!(localStorage.getItem('ioik-fb-ids')||localStorage.getItem('ioik-rated')); }catch(e){}
+      if(sent){ const {fs,db,user,auth}=await fbReady(); await deleteFeedback(fs,db,user.uid); try{ await user.delete(); }catch(e){ try{ await auth.signOut(); }catch(e2){} } }
     }
     try{ Object.keys(localStorage).filter(k=>k===KEY||k.startsWith('ioik-')).forEach(k=>localStorage.removeItem(k)); }catch(e){}
     location.replace(location.pathname);
@@ -387,9 +446,10 @@ function renderPrivacy(){
     <header class="mast"><h1 style="font-size:40px">Your <span>privacy</span></h1><p>Plain English, no small print.</p></header>
     <section><h3>What we keep</h3>
       <p>If you join a family scoreboard: your first name, the emblem you pick, your family code, the cards you have collected, your XP and streak, and any card requests you send. You are signed in with a random ID, not an email address or phone number.</p>
-      <p>If you play on your own, nothing leaves your device.</p></section>
+      <p>To see what\u2019s working, the app also records which days you played and your first quiz score on each card. If you rate a card or send feedback, that is kept too, with your first name and family code.</p>
+      <p>If you play on your own, nothing leaves your device unless you rate a card or send feedback.</p></section>
     <section><h3>Who can see it</h3>
-      <p>Your name, emblem and scores are only shown to people who have your family code. Card requests are seen by your family and by the person who writes the cards, who uses them to decide what to make next.</p></section>
+      <p>Your name, emblem and scores are only shown to people who have your family code. Card requests are seen by your family and by the person who writes the cards, who uses them to decide what to make next. Ratings, feedback and play statistics are only seen by the person who runs the app.</p></section>
     <section><h3>Where it is kept</h3>
       <p>On your device, and in Google Firebase in London. The app also loads fonts from Google and the \u201cOn this day\u201d story from Wikipedia, so those services see your device\u2019s internet address, as any website does.</p></section>
     <section><h3>How long we keep it</h3>
@@ -399,7 +459,7 @@ function renderPrivacy(){
     <section><h3>Who runs this</h3>
       <p>${PRIVACY_OWNER?esc(PRIVACY_OWNER):'<i>Name to be added</i>'}${PRIVACY_CONTACT?` \u00b7 <a href="mailto:${esc(PRIVACY_CONTACT)}">${esc(PRIVACY_CONTACT)}</a>`:' \u00b7 <i>contact email to be added</i>'}. You can ask what we hold about you, ask us to correct it, or complain to the Information Commissioner\u2019s Office (ico.org.uk).</p></section>
     <section class="path delbox"><h3>Delete my data</h3>
-      ${S.confirmDel?`<p>This removes ${fam?'your scores, your emblem and your card requests from the family scoreboard, and ':''}everything this app has saved on this device. You can\u2019t undo it.</p>
+      ${S.confirmDel?`<p>This removes ${fam?'your scores, your emblem and your card requests from the family scoreboard, ':''}your ratings and feedback, and everything this app has saved on this device. You can\u2019t undo it.</p>
         <div class="rowb"><button class="textbtn" data-act="delno">Cancel</button><button class="small danger" data-act="delyes">Yes, delete everything</button></div>`
       :`<p>${fam?'Removes you from the family scoreboard and':'Removes'} all your progress on this device.</p><button class="cta ghost" data-act="delask" style="align-self:flex-start">Delete my data</button>`}
       <p class="note" id="delmsg" role="status"></p>
@@ -422,6 +482,9 @@ async function initShared(){
       else if(remote.last===P.last){P.streak=Math.max(P.streak||0,remote.streak||0);}
       if(remote.week&&(!P.week||remote.week.id>P.week.id||(remote.week.id===P.week.id&&remote.week.xp>P.week.xp))) P.week=remote.week;
       if(remote.freeze&&(!P.freezeWeek||remote.freeze>P.freezeWeek)) P.freezeWeek=remote.freeze;
+      P.scores=Object.assign({},remote.scores||{},P.scores);
+      P.days=[...new Set([...(remote.days||[]),...P.days])].sort().slice(-60);
+      if(remote.joined&&remote.joined<P.joined) P.joined=remote.joined;
       save();
     }
     SH.state='on'; clearTimeout(timer);
@@ -822,7 +885,7 @@ function renderHome(){
       </form>
       <div class="rqs" id="rqs">${reqsHTML()}</div>
     </section>
-    <p class="foot">${PROFILE&&!PROFILE.solo?`Playing as ${esc(PROFILE.name)} \u00b7 family code ${esc(PROFILE.code)}. `:'Playing solo. '}Progress is saved on this device${PROFILE&&!PROFILE.solo?' and to the family scoreboard':''}. <button class="textbtn" data-act="rejoin">${PROFILE&&!PROFILE.solo?'Change name or emblem':'Change'}</button> \u00b7 <button class="textbtn" data-act="howto">How to play</button> \u00b7 <button class="textbtn" data-go="privacy">Privacy</button></p>
+    <p class="foot">${PROFILE&&!PROFILE.solo?`Playing as ${esc(PROFILE.name)} \u00b7 family code ${esc(PROFILE.code)}. `:'Playing solo. '}Progress is saved on this device${PROFILE&&!PROFILE.solo?' and to the family scoreboard':''}. <button class="textbtn" data-act="rejoin">${PROFILE&&!PROFILE.solo?'Change name or emblem':'Change'}</button> \u00b7 <button class="textbtn" data-act="howto">How to play</button> \u00b7 <button class="textbtn" data-act="feedback">Send feedback</button> \u00b7 <button class="textbtn" data-go="privacy">Privacy</button></p>
   </div>`;
   fillNames();
 }
@@ -875,6 +938,7 @@ function renderDone(){
     ${requestedBy(S.id)?`<p class="reqby">Requested by ${esc(requestedBy(S.id))}</p>`:''}
     <p class="score">${S.score} of ${st.quiz.length} correct · +${S.gained} XP · ${currentStreak()}-day streak</p>
     <div class="take"><span class="sc">The takeaway</span><p>${esc(st.take)}</p></div>
+    ${rateHTML(S.id)}
     <div class="finish-btns"><button class="cta ghost" data-act="share">Share your score</button><button class="cta" data-go="home">Back to the decks</button></div>
   </div>`;
 }
@@ -902,6 +966,7 @@ function render(){
   else if(S.view==='flashdone') renderFlashDone();
   else if(S.view==='timeline') renderTimeline();
   else if(S.view==='privacy') renderPrivacy();
+  else if(S.view==='feedback') renderFeedback();
   window.scrollTo(0,0);
   paintArt(app);
   maybeTour();
@@ -928,6 +993,7 @@ function finish(){
   const before=rankFor(cardsDone(P.done));
   const d=deckOf(S.id), deckWasDone=d.ids.every(i=>P.done[i]);
   const gained=S.score*10+(first?20:5);
+  if(first) P.scores[S.id]=S.score;
   P.done[S.id]=true; addXP(gained); playedToday();
   const after=rankFor(cardsDone(P.done));
   S.rankUp = after>before ? after : null;
@@ -943,11 +1009,13 @@ app.addEventListener('click',e=>{
   if(b.dataset.pick!==undefined && S.picked===null){
     S.picked=+b.dataset.pick; if(S.picked===curQ().a){ S.score++; SFX.right(); } else SFX.wrong(); render(); return;
   }
+  if(b.dataset.rate){ sendRating(S.id,+b.dataset.rate); return; }
   if(b.dataset.emb){ PICKED_EMBLEM=b.dataset.emb; app.querySelectorAll('.emb').forEach(x=>{const on=x===b; x.classList.toggle('on',on); x.setAttribute('aria-pressed',on);}); return; }
   const a=b.dataset.act; const st=S.id&&STORIES[S.id];
   if(a==='sound'){ toggleSound(); b.textContent=SOUND?'Sound on':'Sound off'; b.setAttribute('aria-pressed',SOUND); return; }
   if(a==='share'){ shareScore(); return; }
   if(a==='newfam'){ newFamily(); return; }
+  if(a==='feedback'||a==='fbcard'){ stopSpeech(); S.fbAbout=a==='fbcard'?S.id:''; S.view='feedback'; render(); return; }
   if(a==='invite'){ shareInvite(); return; }
   if(a==='delask'||a==='delno'){ S.confirmDel=a==='delask'; renderPrivacy(); return; }
   if(a==='delyes'){ deleteMyData(); return; }
@@ -976,6 +1044,7 @@ app.addEventListener('submit',e=>{
   e.preventDefault();
   const f=e.target;
   if(f.id==='joinform'){ joinFamily(); return; }
+  if(f.id==='fbform'){ sendFeedback(); return; }
   if(f.id==='reqform'){
     const ta=document.getElementById('reqtext'); const msg=document.getElementById('reqmsg');
     const text=(ta.value||'').trim().slice(0,280);

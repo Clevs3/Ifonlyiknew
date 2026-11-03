@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#151827">
+<title>If Only I Knew: stats</title>
+<link rel="icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&family=IM+Fell+English+SC&family=Literata:opsz,wght@7..72,400;7..72,600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#151827;--surface:#1e2236;--surface-2:#282d46;--text:#ece4d3;--muted:#a8a192;--brass:#d6a64f;--line:rgba(236,228,211,.13);--good:#86c596;--bad:#e3826f;--display:'IM Fell English',Georgia,serif;--sc:'IM Fell English SC',Georgia,serif;--body:'Literata',Georgia,serif;color-scheme:dark}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:16px;line-height:1.5}
+.wrap{max-width:760px;margin:0 auto;padding:20px 16px 60px;display:flex;flex-direction:column;gap:26px}
+h1{font-family:var(--display);font-weight:400;font-size:38px;margin:0}h1 span{color:var(--brass);font-style:italic}
+h2{font-family:var(--display);font-weight:400;font-size:24px;margin:0 0 10px}
+.sc{font-family:var(--sc);letter-spacing:.06em;color:var(--muted);font-size:14px}
+.note{color:var(--muted);font-size:14px;margin:4px 0 0}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px}
+.tile b{display:block;font-family:var(--display);font-size:32px;font-weight:400;line-height:1.1}
+.tile span{font-size:13px;color:var(--muted)}
+.tile.good b{color:var(--good)}.tile.bad b{color:var(--bad)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-family:var(--sc);font-weight:400;color:var(--muted);letter-spacing:.04em}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+.scroll{overflow-x:auto}
+.flag{font-size:12px;border-radius:999px;padding:2px 8px;white-space:nowrap}
+.flag.easy{background:rgba(214,166,79,.18);color:var(--brass)}.flag.hard{background:rgba(227,130,111,.18);color:var(--bad)}.flag.liked{background:rgba(134,197,150,.18);color:var(--good)}
+.bar{height:8px;border-radius:4px;background:var(--brass)}
+.msg{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px}
+.msg p{margin:0 0 4px;white-space:pre-wrap}.msg span{font-size:13px;color:var(--muted)}
+button{font:inherit;cursor:pointer;background:var(--brass);color:#1b1608;border:0;border-radius:999px;padding:10px 20px;font-weight:600}
+button.ghost{background:none;color:var(--text);border:1px solid var(--line)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+a{color:var(--brass)}
+</style>
+</head>
+<body>
+<div class="wrap" id="root">
+  <header><span class="sc">If Only I Knew</span><h1>How it’s <span>going</span></h1></header>
+  <div id="out"><p class="note">Loading…</p></div>
+</div>
+<script src="decks.js"></script>
+<script type="module">
+const CONFIG={apiKey:"AIzaSyCgQYa4-Pdns68RJEufflgSr4G81FExk_0",authDomain:"ifonlyiknew.firebaseapp.com",projectId:"ifonlyiknew",storageBucket:"ifonlyiknew.firebasestorage.app",messagingSenderId:"680893194650",appId:"1:680893194650:web:349b9f75797926591eda23"};
+const V='10.12.2', base=`https://www.gstatic.com/firebasejs/${V}/`;
+const [appMod,authMod,fs]=await Promise.all([import(base+'firebase-app.js'),import(base+'firebase-auth.js'),import(base+'firebase-firestore.js')]);
+// A separate app instance, so signing in here never touches the player sign-in on this device.
+const fbApp=appMod.initializeApp(CONFIG,'admin');
+const auth=authMod.getAuth(fbApp), db=fs.getFirestore(fbApp);
+const out=document.getElementById('out');
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pct=(a,b)=>b?Math.round(a/b*100)+'%':'–';
+function day(off=0){const d=new Date();d.setDate(d.getDate()+off);return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10)}
+function addDays(s,n){const d=new Date(s+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)}
+const title=id=>STORIES[id]?STORIES[id].title:id;
+const deckName=id=>{const p=PATHS.find(p=>p.ids.includes(id));return p?p.name:'';};
+
+function signInView(msg){
+  out.innerHTML=`<p>${msg||'Sign in with the Google account that runs the app to see the stats.'}</p><div class="row"><button id="signin">Sign in with Google</button>${auth.currentUser&&!auth.currentUser.isAnonymous?'<button class="ghost" id="signout">Sign out</button>':''}</div>`;
+  document.getElementById('signin').onclick=async()=>{
+    const prov=new authMod.GoogleAuthProvider();
+    try{ await authMod.signInWithPopup(auth,prov); }
+    catch(e){ if(e.code==='auth/popup-blocked'||e.code==='auth/operation-not-supported-in-this-environment') await authMod.signInWithRedirect(auth,prov); else signInView('Sign-in didn’t work: '+esc(e.code||e.message)); }
+  };
+  const so=document.getElementById('signout'); if(so) so.onclick=()=>authMod.signOut(auth);
+}
+
+async function loadAll(){
+  const [pl,inbox,reqs,ratings,fb]=await Promise.all([
+    fs.getDocs(fs.collectionGroup(db,'players')),
+    fs.getDocs(fs.query(fs.collection(db,'inbox'),fs.orderBy('at','desc'),fs.limit(200))),
+    fs.getDocs(fs.collectionGroup(db,'requests')),
+    fs.getDocs(fs.collection(db,'ratings')),
+    fs.getDocs(fs.query(fs.collection(db,'feedback'),fs.orderBy('at','desc'),fs.limit(100)))
+  ]);
+  const players=pl.docs.map(d=>Object.assign({uid:d.id,code:d.ref.parent.parent.id},d.data())).filter(p=>p.name);
+  const names={}; players.forEach(p=>names[p.uid]=p.name);
+  const inboxList=inbox.docs.map(d=>Object.assign({id:d.id},d.data()));
+  const seen=new Set(inboxList.map(r=>r.id));
+  reqs.docs.forEach(d=>{ if(!seen.has(d.id)){ const r=d.data(); inboxList.push({id:d.id,code:d.ref.parent.parent.id,name:names[r.uid]||'',text:r.text,at:r.at}); } });
+  inboxList.sort((a,b)=>String(b.at).localeCompare(String(a.at)));
+  return {players,inbox:inboxList,ratings:ratings.docs.map(d=>d.data()),feedback:fb.docs.map(d=>Object.assign({id:d.id},d.data()))};
+}
+
+function report({players,inbox,ratings,feedback}){
+  const today=day(0), wk=day(-6);
+  const families=new Map(); players.forEach(p=>{ const f=families.get(p.code)||{code:p.code,players:0,last:'',cards:0}; f.players++; f.cards+=Object.keys(p.done||{}).length; if((p.last||'')>f.last) f.last=p.last||''; families.set(p.code,f); });
+  const active=players.filter(p=>(p.last||'')>=wk||(p.days||[]).some(d=>d>=wk)).length;
+  const tracked=players.filter(p=>p.joined&&Array.isArray(p.days));
+  const e1=tracked.filter(p=>p.joined<=day(-1)), b1=e1.filter(p=>p.days.includes(addDays(p.joined,1)));
+  const e7=tracked.filter(p=>p.joined<=day(-7)), b7=e7.filter(p=>p.days.some(d=>d>=addDays(p.joined,7)));
+  const done=p=>Object.keys(p.done||{}).filter(k=>STORIES[k]).length;
+  const buckets=[['None yet',0,0],['1',1,1],['2',2,2],['3 to 5',3,5],['6 to 10',6,10],['11 or more',11,1e9]].map(([l,lo,hi])=>[l,players.filter(p=>done(p)>=lo&&done(p)<=hi).length]);
+  const maxB=Math.max(1,...buckets.map(b=>b[1]));
+  const cards=Object.keys(STORIES).map(id=>{
+    const got=players.filter(p=>p.done&&p.done[id]).length;
+    const sc=players.map(p=>p.scores&&p.scores[id]).filter(v=>typeof v==='number');
+    const avg=sc.length?sc.reduce((a,b)=>a+b,0)/sc.length:null;
+    const up=ratings.filter(r=>r.card===id&&r.value===1).length, down=ratings.filter(r=>r.card===id&&r.value===-1).length;
+    let flag='';
+    if(sc.length>=5&&avg>=2.8) flag='<span class="flag easy">Too easy?</span>';
+    else if(sc.length>=5&&avg<1.8) flag='<span class="flag hard">Check questions</span>';
+    if(up+down>=4&&down/(up+down)>=.4) flag+=' <span class="flag hard">Not loved</span>';
+    else if(up+down>=4&&up/(up+down)>=.85) flag+=' <span class="flag liked">Loved</span>';
+    return {id,got,n:sc.length,avg,up,down,flag};
+  }).sort((a,b)=>b.got-a.got);
+  const totUp=ratings.filter(r=>r.value===1).length, totDown=ratings.filter(r=>r.value===-1).length;
+  out.innerHTML=`
+  <section><div class="tiles">
+    <div class="tile"><b>${families.size}</b><span>families</span></div>
+    <div class="tile"><b>${players.length}</b><span>players</span></div>
+    <div class="tile"><b>${active}</b><span>played in the last 7 days</span></div>
+    <div class="tile ${e1.length>=5?(b1.length/e1.length>=.4?'good':'bad'):''}"><b>${pct(b1.length,e1.length)}</b><span>came back the next day (${b1.length} of ${e1.length})</span></div>
+    <div class="tile ${e7.length>=5?(b7.length/e7.length>=.2?'good':'bad'):''}"><b>${pct(b7.length,e7.length)}</b><span>still playing after a week (${b7.length} of ${e7.length})</span></div>
+    <div class="tile"><b>${pct(totUp,totUp+totDown)}</b><span>of card ratings were thumbs up (${totUp+totDown} ratings)</span></div>
+  </div>
+  <p class="note">Return rates only count players whose play days have been tracked, which started on 3 November 2026. A rough guide for a daily game: 40% back the next day is good, 20% still playing after a week is good.</p></section>
+
+  <section><h2>How many cards people collect</h2><p class="note">Shows where people stop playing.</p>
+  <table>${buckets.map(([l,n])=>`<tr><td style="width:110px">${l}</td><td><div class="bar" style="width:${Math.max(2,n/maxB*100)}%"></div></td><td class="n" style="width:50px">${n}</td></tr>`).join('')}</table></section>
+
+  <section><h2>Cards</h2><p class="note">First-try quiz score out of 3, and thumbs up or down from the end of each card.</p>
+  <div class="scroll"><table><tr><th>Card</th><th class="n">Collected</th><th class="n">Avg score</th><th class="n">Up</th><th class="n">Down</th><th></th></tr>
+  ${cards.map(c=>`<tr><td>${esc(title(c.id))}<br><span class="note">${esc(deckName(c.id))}</span></td><td class="n">${c.got}</td><td class="n">${c.avg==null?'–':c.avg.toFixed(1)+` <span class="note">(${c.n})</span>`}</td><td class="n">${c.up}</td><td class="n">${c.down}</td><td>${c.flag}</td></tr>`).join('')}
+  </table></div></section>
+
+  <section><h2>Feedback</h2>${feedback.length?feedback.map(f=>`<div class="msg"><p>${esc(f.text)}</p><span>${esc(f.name||'Someone')} · ${esc(f.code)}${f.view?' · about '+esc(title(f.view)):''} · ${esc(String(f.at).slice(0,10))}</span></div>`).join(''):'<p class="note">No feedback yet.</p>'}</section>
+
+  <section><h2>Card requests</h2>${inbox.length?inbox.slice(0,60).map(r=>{const made=typeof FULFILLED!=='undefined'&&FULFILLED[r.id];return `<div class="msg"><p>${esc(r.text)}</p><span>${esc(r.name||'Someone')} · ${esc(r.code)} · ${esc(String(r.at).slice(0,10))}${made?' · <b style="color:var(--good)">made into a card</b>':''}</span></div>`}).join(''):'<p class="note">No requests yet.</p>'}</section>
+
+  <section><h2>Families</h2><div class="scroll"><table><tr><th>Family code</th><th class="n">Players</th><th class="n">Cards</th><th>Last played</th></tr>
+  ${[...families.values()].sort((a,b)=>b.last.localeCompare(a.last)).map(f=>`<tr><td>${esc(f.code)}</td><td class="n">${f.players}</td><td class="n">${f.cards}</td><td>${esc(f.last||'–')}</td></tr>`).join('')}
+  </table></div></section>
+  <p class="note">Updated ${new Date().toLocaleString('en-GB')} · <a href="./">Open the app</a> · <a href="#" id="signout">Sign out</a></p>`;
+  document.getElementById('signout').onclick=e=>{e.preventDefault();authMod.signOut(auth);};
+}
+
+authMod.getRedirectResult(auth).catch(()=>{});
+authMod.onAuthStateChanged(auth,async user=>{
+  if(!user||user.isAnonymous){ signInView(); return; }
+  out.innerHTML='<p class="note">Loading the numbers…</p>';
+  try{ report(await loadAll()); }
+  catch(e){ if(e.code==='permission-denied') signInView(`${esc(user.email)} doesn’t have access to the stats.`); else out.innerHTML='<p>Couldn’t load the stats: '+esc(e.code||e.message)+'</p>'; }
+});
+</script>
+</body>
+</html>
