@@ -333,6 +333,7 @@ function joinDetails(){
   const name=(document.getElementById('jname').value||'').trim().slice(0,30);
   const msg=document.getElementById('jmsg');
   if(!name){ msg.textContent='Type your first name first.'; document.getElementById('jname').focus(); return null; }
+  if(rude(name)){ msg.textContent='Please pick a family-friendly name.'; document.getElementById('jname').focus(); return null; }
   return {name, msg};
 }
 async function joinFamily(){
@@ -355,6 +356,11 @@ async function newFamily(){
     PROFILE={name:d.name, code, emblem:PICKED_EMBLEM||null, founder:true}; saveProfile(PROFILE); location.reload();
   }catch(e){ d.msg.textContent='Can\u2019t reach the scoreboard right now. Check your connection and try again.'; btn.disabled=false; }
 }
+/* A light family-friendly filter for names and requests. Whole words only, so Scunthorpe,
+   Dick Turpin and Pakistan are fine. Determined trolls can get round it, but anything typed
+   is only ever seen by the writer's own family, and the card writer skips unsuitable requests. */
+const RUDE=/\b(f+u+c+k+\w*|f+c+u+k+\w*|sh[i1]+t+(e|s|ty|ting|head|bag)?|c+u+n+t+s?|wank\w*|bollocks?|bitch\w*|twats?|pricks?|dickheads?|cocksucker\w*|pussy|slut\w*|whore\w*|porn\w*|n[i1]gg\w*|f[a4]gg?(ot|ots|s)?|retard(s|ed)?|pakis?|spastic\w*|spaz|tranny|trannies|rape\w*|motherf\w*)\b/i;
+function rude(t){ const n=String(t||'').toLowerCase().replace(/[0@4]/g,m=>({'0':'o','@':'a','4':'a'}[m])).replace(/[1!|]/g,'i').replace(/3/g,'e').replace(/[$5]/g,'s').replace(/(\w)[.*_-](?=\w)/g,'$1'); return RUDE.test(n); }
 function inviteText(){ return `Join our family on If Only I Knew, a five-minute history card game. Open ${location.origin+location.pathname}, then type our family code: ${PROFILE.code}`; }
 async function shareInvite(){
   const text=inviteText();
@@ -1049,6 +1055,7 @@ app.addEventListener('submit',e=>{
     const ta=document.getElementById('reqtext'); const msg=document.getElementById('reqmsg');
     const text=(ta.value||'').trim().slice(0,280);
     if(!text){ msg.textContent='Type a person, event or invention first.'; return; }
+    if(rude(text)){ msg.textContent='Please keep requests family-friendly. Try another person, event or invention.'; return; }
     if(PROFILE&&PROFILE.solo){ msg.textContent='Join a family scoreboard to send requests.'; return; }
     if(SH.state!=='on'){ msg.textContent='The scoreboard isn’t connected yet. Try again in a moment.'; return; }
     const btn=document.getElementById('reqsend'); btn.disabled=true; msg.textContent='Sending…';
