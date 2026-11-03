@@ -85,6 +85,80 @@ function renderRanks(){
   </div>`;
 }
 
+/* ---------- first-time guided tour ---------- */
+const TOURS={
+  home:[
+    {title:'Welcome to If Only I Knew', text:'Each card is a five-minute story from history, with a quick quiz at the end. Here’s a 30-second tour.'},
+    {sel:'.feature', title:'Today’s draw', text:'Tap here to play today’s card. Brand-new cards always turn up here first.'},
+    {sel:'.rank-card', title:'Your rank', text:'Every card you collect moves you up the ranks, from Wanderer all the way to Keeper of Time. Tap it to see the full ladder.'},
+    {sel:'.stats', title:'Streaks and XP', text:'Play a card each day to build a streak. Your streak shield saves one missed day a week, and a new shield arrives every Monday.'},
+    {sel:'.flash-card', title:'Flashback quiz', text:'Once you’ve collected two cards, this mixes up questions from cards you’ve already played. The first round each day earns bonus XP.'},
+    {sel:'#board', title:'Family scoreboard', text:'See how you’re doing against the family. It’s ranked by this week’s XP and starts again every Monday, so anyone can win a week.'},
+    {sel:'.decks', title:'The decks', text:'Cards are grouped into decks. Tap a deck to open it and pick any card. Collect a whole deck to earn its gold seal.'},
+    {sel:'#reqform', title:'Request a card', text:'Want a story about someone or something in particular? Ask here. When your idea becomes a card, it’ll say it was requested by you.'}
+  ],
+  card:[
+    {sel:'[data-act="listen"]', title:'Read aloud', text:'Tap Listen and the story is read out to you, turning the pages as it goes. Tap Stop to pause it.'},
+    {sel:'.segs', title:'Your progress', text:'Each bar is one part of the story. The last three are the quiz.'},
+    {sel:'.fig', title:'What’s pictured', text:'Every part shows the person, place or thing it’s about.'},
+    {sel:'.nav .primary', title:'Turn the page', text:'Tap Next, or swipe left on the story. Swipe right to go back a page.'},
+    {sel:'[data-act="close"]', title:'Close the card', text:'Tap the cross to go back to the decks at any time. You can start the card again whenever you like.'}
+  ],
+  quiz:[
+    {sel:'.q', title:'Play the card', text:'Answer three quick questions. Every answer is in the story you’ve just read. You get 10 XP for each right answer, plus 20 XP the first time you collect a card.'}
+  ]
+};
+function tourSeen(n){ try{return localStorage.getItem('ioik-tour-'+n)==='1'}catch(e){return true} }
+function markTour(n){ try{localStorage.setItem('ioik-tour-'+n,'1')}catch(e){} }
+let TOUR=null;
+function maybeTour(){
+  if(TOUR) return;
+  const n = S.view==='home'?'home' : S.view==='story'?'card' : S.view==='quiz'?'quiz' : null;
+  if(!n || tourSeen(n)) return;
+  setTimeout(()=>{ if(!TOUR && ((n==='home'&&S.view==='home')||(n==='card'&&S.view==='story')||(n==='quiz'&&S.view==='quiz'))) startTour(n); },450);
+}
+function startTour(n){
+  const steps=TOURS[n].filter(st=>!st.sel||document.querySelector(st.sel));
+  if(!steps.length){ markTour(n); return; }
+  if(S.listening){ S.listening=false; stopSpeech(); }
+  TOUR={n,steps,i:0};
+  const el=document.createElement('div'); el.className='tour'; el.id='tour';
+  el.setAttribute('role','dialog'); el.setAttribute('aria-modal','true'); el.setAttribute('aria-labelledby','tour-t');
+  el.innerHTML='<div class="tour-hole"></div><div class="tour-tip"><span class="sc" id="tour-n"></span><h3 id="tour-t"></h3><p id="tour-x"></p><div class="tour-nav"><button class="textbtn" data-tour="skip">Skip tour</button><span class="tour-dots" aria-hidden="true"></span><button class="small" data-tour="next"></button></div></div>';
+  document.body.appendChild(el);
+  el.addEventListener('click',e=>{
+    const b=e.target.closest('[data-tour]'); if(!b) return;
+    if(b.dataset.tour==='skip') endTour(); else if(TOUR.i<TOUR.steps.length-1){ TOUR.i++; showStep(); } else endTour();
+  });
+  showStep();
+}
+function showStep(){
+  const st=TOUR.steps[TOUR.i], el=document.getElementById('tour'); if(!el) return;
+  const hole=el.querySelector('.tour-hole'), tip=el.querySelector('.tour-tip');
+  el.querySelector('#tour-n').textContent=`${TOUR.i+1} of ${TOUR.steps.length}`;
+  el.querySelector('#tour-t').textContent=st.title;
+  el.querySelector('#tour-x').textContent=st.text;
+  el.querySelector('[data-tour="next"]').textContent=TOUR.i===TOUR.steps.length-1?'Got it':'Next';
+  el.querySelector('.tour-dots').innerHTML=TOUR.steps.map((_,k)=>`<i class="${k===TOUR.i?'on':''}"></i>`).join('');
+  const target=st.sel&&document.querySelector(st.sel);
+  tip.style.top=''; tip.style.bottom='';
+  if(!target){ hole.style.display='none'; el.classList.add('dim'); tip.style.top='50%'; tip.style.transform='translateY(-50%)'; el.querySelector('[data-tour="next"]').focus(); return; }
+  el.classList.remove('dim'); hole.style.display='block'; tip.style.transform='';
+  target.scrollIntoView({block:'center',behavior:'instant'});
+  requestAnimationFrame(()=>{
+    const r=target.getBoundingClientRect(), pad=6, H=window.innerHeight;
+    hole.style.left=(r.left-pad)+'px'; hole.style.top=(r.top-pad)+'px';
+    hole.style.width=(r.width+pad*2)+'px'; hole.style.height=(Math.min(r.height,H*.55)+pad*2)+'px';
+    if(r.top+Math.min(r.height,H*.55)/2 < H*0.5) tip.style.top=Math.min(H-220,r.top+Math.min(r.height,H*.55)+pad+12)+'px';
+    else tip.style.bottom=Math.min(H-220,H-r.top+pad+12)+'px';
+    el.querySelector('[data-tour="next"]').focus();
+  });
+}
+function endTour(){ if(!TOUR) return; markTour(TOUR.n); TOUR=null; const el=document.getElementById('tour'); if(el) el.remove(); }
+document.addEventListener('keydown',e=>{ if(TOUR&&e.key==='Escape') endTour(); });
+window.addEventListener('resize',()=>{ if(TOUR) showStep(); });
+function replayTour(){ ['home','card','quiz'].forEach(n=>{ try{localStorage.removeItem('ioik-tour-'+n)}catch(e){} }); S.view='home'; render(); }
+
 /* ---------- flashback quiz ---------- */
 const FLASH_LEN=5;
 function flashPool(){ const out=[]; ORDER.filter(i=>P.done[i]).forEach(id=>STORIES[id].quiz.forEach((q,qi)=>out.push([id,qi]))); return out; }
@@ -465,7 +539,7 @@ function renderHome(){
       </form>
       <div class="rqs" id="rqs">${reqsHTML()}</div>
     </section>
-    <p class="foot">${PROFILE&&!PROFILE.solo?`Playing as ${esc(PROFILE.name)} \u00b7 family code ${esc(PROFILE.code)}. `:'Playing solo. '}Progress is saved on this device${PROFILE&&!PROFILE.solo?' and to the family scoreboard':''}. <button class="textbtn" data-act="rejoin">Change</button></p>
+    <p class="foot">${PROFILE&&!PROFILE.solo?`Playing as ${esc(PROFILE.name)} \u00b7 family code ${esc(PROFILE.code)}. `:'Playing solo. '}Progress is saved on this device${PROFILE&&!PROFILE.solo?' and to the family scoreboard':''}. <button class="textbtn" data-act="rejoin">Change</button> \u00b7 <button class="textbtn" data-act="howto">How to play</button></p>
   </div>`;
   fillNames();
 }
@@ -545,6 +619,7 @@ function render(){
   else if(S.view==='flashdone') renderFlashDone();
   window.scrollTo(0,0);
   paintArt(app);
+  maybeTour();
 }
 app.addEventListener('toggle',e=>{
   const d=e.target; if(!d.matches||!d.matches('details.deck')) return;
@@ -583,6 +658,7 @@ app.addEventListener('click',e=>{
     S.picked=+b.dataset.pick; if(S.picked===curQ().a) S.score++; render(); return;
   }
   const a=b.dataset.act; const st=S.id&&STORIES[S.id];
+  if(a==='howto'){ replayTour(); return; }
   if(a==='flash'){ startFlash(); return; }
   if(a==='fnext'){ if(S.fi<S.fq.length-1){ S.fi++; S.picked=null; render(); } else finishFlash(); return; }
   if(a==='tab-week'||a==='tab-all'){ SH.tab=a==='tab-week'?'week':'all'; refreshShared(); return; }
